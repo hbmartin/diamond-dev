@@ -53,7 +53,11 @@ class GitOperations:
             "refs/remotes/origin/HEAD",
             log_name="remote-default-branch",
         )
-        remote_ref = result.output.strip().splitlines()[-1]
+        lines = result.output.strip().splitlines()
+        if not lines:
+            raise DiamondDevError("No output returned from symbolic-ref command")
+
+        remote_ref = lines[-1]
         if not remote_ref.startswith("origin/"):
             raise DiamondDevError(f"Unexpected remote HEAD ref: {remote_ref}")
         return remote_ref.removeprefix("origin/")

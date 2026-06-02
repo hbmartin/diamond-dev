@@ -88,6 +88,9 @@ def test_main_logs_diamond_dev_errors_without_traceback(
     monkeypatch.setenv("DIAMOND_DEV_JSON_LOG_FILE", str(json_log_file))
 
     class FailingOrchestrator:
+        def __init__(self, *, config_path: Path | None = None) -> None:
+            del config_path
+
         def run(self, plan_path: Path) -> int:
             del plan_path
             raise DiamondDevError("planned failure")

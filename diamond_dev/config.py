@@ -49,49 +49,27 @@ class DiamondDevConfig:
             return prompt_path
         return self.config_dir / prompt_path
 
-    @property
-    def notify_initial_implementation_url(self) -> str | None:
-        """Return the initial-implementation notification URL."""
-        return self.notifications.initial_implementation_url
-
-    @property
-    def notify_comparison_url(self) -> str | None:
-        """Return the comparison-ready notification URL."""
-        return self.notifications.comparison_url
-
-    @property
-    def notify_comparison_implementation_url(self) -> str | None:
-        """Return the comparison-implementation notification URL."""
-        return self.notifications.comparison_implementation_url
-
-    @property
-    def notify_review_input_needed_url(self) -> str | None:
-        """Return the review-input-needed notification URL."""
-        return self.notifications.review_input_needed_url
-
-    @property
-    def notify_open_pr_url(self) -> str | None:
-        """Return the open-pull-request notification URL."""
-        return self.notifications.open_pr_url
-
-
-def load_config(cwd: Path) -> DiamondDevConfig:
+def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
     """Load and validate `.diamond-dev.toml` from the invocation directory."""
-    config_path = cwd / CONFIG_FILE_NAME
-    if not config_path.is_file():
-        raise ConfigError(f"Missing required config file: {config_path}")
+    resolved_config_path = _resolve_config_path(cwd, config_path)
+    if not resolved_config_path.is_file():
+        raise ConfigError(f"Missing required config file: {resolved_config_path}")
 
     try:
-        with config_path.open("rb") as config_file:
+        with resolved_config_path.open("rb") as config_file:
             raw_config = tomllib.load(config_file)
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise ConfigError(
-            f"Could not read config file {config_path}: {error}",
+            f"Could not read config file {resolved_config_path}: {error}",
         ) from error
 
-    repository_url = _required_git_remote_url(raw_config, "repository_url", config_path)
+    repository_url = _required_git_remote_url(
+        raw_config,
+        "repository_url",
+        resolved_config_path,
+    )
     return DiamondDevConfig(
-        config_path=config_path,
+        config_path=resolved_config_path,
         repository_url=repository_url,
         notes_repository_url=_optional_string(raw_config, "notes_repository_url"),
         gemini_comparison_prompt_file=_optional_string(
@@ -115,6 +93,14 @@ def read_gemini_prompt(config: DiamondDevConfig) -> str | None:
         raise ConfigError(
             f"Could not read Gemini comparison prompt file {prompt_path}: {error}",
         ) from error
+
+
+def _resolve_config_path(cwd: Path, config_path: Path | None) -> Path:
+    if config_path is None:
+        return cwd / CONFIG_FILE_NAME
+    if config_path.is_absolute():
+        return config_path
+    return cwd / config_path
 
 
 def _required_string(raw_config: dict[str, Any], key: str, config_path: Path) -> str:

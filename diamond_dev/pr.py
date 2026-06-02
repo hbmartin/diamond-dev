@@ -10,10 +10,21 @@ from diamond_dev.errors import DiamondDevError
 if TYPE_CHECKING:
     from diamond_dev.workflow import RunContext, SelectedImplementation
 
+_PR_URL_PATTERN = re.compile(r"https://\S+/pull/\d+")
+
+
+def parse_pr_url(gh_output: str) -> str:
+    """Extract the GitHub pull request URL from gh output."""
+    match = _PR_URL_PATTERN.search(gh_output)
+    if match is None:
+        raise DiamondDevError(f"Could not parse PR URL from gh output: {gh_output}")
+    return match.group(0)
+
 
 def parse_pr_number(gh_output: str) -> str:
     """Extract a GitHub pull request number from gh output."""
-    match = re.search(r"/pull/(\d+)", gh_output)
+    pr_url = parse_pr_url(gh_output)
+    match = re.search(r"/pull/(\d+)", pr_url)
     if match is None:
         raise DiamondDevError(f"Could not parse PR number from gh output: {gh_output}")
     return match.group(1)

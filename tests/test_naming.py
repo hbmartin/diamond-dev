@@ -54,6 +54,8 @@ def test_repository_name_from_url(repository_url: str, expected: str) -> None:
         "ssh://git@github.com/owner/repo.git",
         "git://example.com/owner/repo.git",
         "file:///tmp/repo.git",
+        "file:///repo",
+        "file://localhost/repo",
     ],
 )
 def test_is_git_remote_url_accepts_git_url_formats(repository_url: str) -> None:
@@ -71,6 +73,8 @@ def test_is_git_remote_url_accepts_git_url_formats(repository_url: str) -> None:
         "git@github.com",
         "git@github.com:owner",
         "ftp://github.com/owner/repo.git",
+        "file://",
+        "file://localhost",
     ],
 )
 def test_is_git_remote_url_rejects_malformed_urls(repository_url: str) -> None:

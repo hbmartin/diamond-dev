@@ -27,7 +27,17 @@ class CommandResult:
     output: str
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
+class CommandLogRecord:
+    """Log metadata for a command started by the runner."""
+
+    label: str
+    command: tuple[str, ...]
+    cwd: Path
+    log_path: Path
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessMetadata:
     """Immutable identifying information for a managed process."""
 
@@ -79,6 +89,7 @@ class CommandRunner:
     def __init__(self, log_dir: Path) -> None:
         """Create a command runner using a log directory."""
         self.log_dir = log_dir
+        self.command_logs: list[CommandLogRecord] = []
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def run(
@@ -126,6 +137,12 @@ class CommandRunner:
         """Start a command and begin streaming output asynchronously."""
         command_tuple = tuple(command)
         log_path = self._log_path(log_name)
+        self._record_command_log(
+            label=log_name,
+            command=command_tuple,
+            cwd=cwd,
+            log_path=log_path,
+        )
         log_file = log_path.open("w", encoding="utf-8")
         logger.info("Starting {}: {}", log_name, shlex.join(command_tuple))
         try:
@@ -188,6 +205,12 @@ class CommandRunner:
         """Run an interactive command without capturing its terminal streams."""
         command_tuple = tuple(command)
         log_path = self._log_path(log_name)
+        self._record_command_log(
+            label=log_name,
+            command=command_tuple,
+            cwd=cwd,
+            log_path=log_path,
+        )
         logger.info("Starting interactive {}: {}", log_name, shlex.join(command_tuple))
         with log_path.open("w", encoding="utf-8") as log_file:
             log_file.write(f"$ {shlex.join(command_tuple)}\n")
@@ -227,6 +250,12 @@ class CommandRunner:
         check: bool,
     ) -> CommandResult:
         log_path = self._log_path(log_name)
+        self._record_command_log(
+            label=log_name,
+            command=command,
+            cwd=cwd,
+            log_path=log_path,
+        )
         logger.info("Running {}: {}", log_name, shlex.join(command))
         captured_output: list[str] | None = [] if output_path is None else None
 
@@ -288,6 +317,23 @@ class CommandRunner:
     def _log_path(self, log_name: str) -> Path:
         safe_name = re_slug(log_name)
         return self.log_dir / f"{safe_name}.log"
+
+    def _record_command_log(
+        self,
+        *,
+        label: str,
+        command: tuple[str, ...],
+        cwd: Path,
+        log_path: Path,
+    ) -> None:
+        self.command_logs.append(
+            CommandLogRecord(
+                label=label,
+                command=command,
+                cwd=cwd,
+                log_path=log_path,
+            ),
+        )
 
 
 def re_slug(value: str) -> str:

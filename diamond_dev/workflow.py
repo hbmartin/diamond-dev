@@ -86,6 +86,7 @@ class RunContext:
     implementation: ImplementationContext
     comparison_file: Path
     dirty_records: tuple[DirtyRecord, ...] = ()
+    pr_url: str | None = None
 
     def with_implementation(
         self,
@@ -100,6 +101,10 @@ class RunContext:
             self,
             dirty_records=(*self.dirty_records, dirty_record),
         )
+
+    def with_pr_url(self, pr_url: str) -> RunContext:
+        """Return a copy with the created pull request URL."""
+        return replace(self, pr_url=pr_url)
 
 
 @dataclass(frozen=True, slots=True)

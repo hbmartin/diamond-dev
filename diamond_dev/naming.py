@@ -67,7 +67,7 @@ def is_git_remote_url(repository_url: str) -> bool:
     if scheme not in _GIT_URL_SCHEMES:
         return False
     if scheme == "file":
-        return _has_repository_path(parsed_url.path)
+        return bool(parsed_url.path.strip("/"))
     return _has_url_host(parsed_url) and _has_repository_path(parsed_url.path)
 
 

@@ -5,10 +5,13 @@ from __future__ import annotations
 import shutil
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, TypeVar
 
 from loguru import logger
 
+from diamond_dev import pr, workflow
 from diamond_dev.acceptance import (
     AgentChoice,
     acceptance_wait_delays,
@@ -31,27 +34,16 @@ from diamond_dev.commands import (
 )
 from diamond_dev.config import load_config, read_gemini_prompt
 from diamond_dev.errors import CommandFailureError, DiamondDevError
-from diamond_dev.executor import CommandResult, CommandRunner
+from diamond_dev.executor import CommandLogRecord, CommandResult, CommandRunner
 from diamond_dev.git_ops import GitOperations
 from diamond_dev.notify import notify_url
-from diamond_dev.pr import build_pr_body, parse_pr_number
-from diamond_dev.workflow import (
-    DirtyRecord,
-    ImplementationContext,
-    NotesContext,
-    PlanContext,
-    RunContext,
-    SelectedImplementation,
-    build_run_context,
-    resolve_plan_path,
-    selected_implementation,
-)
+from diamond_dev.preflight import PreflightSummary, run_preflight
+from diamond_dev.report import PhaseTiming, RunReport, RunStatus, write_run_report
 
-__all__ = (
-    "DiamondDevOrchestrator", "DirtyRecord", "ImplementationContext",
-    "NotesContext", "PlanContext", "RunContext", "SelectedImplementation",
-    "build_pr_body",
-)
+if TYPE_CHECKING:
+    from diamond_dev.workflow import RunContext, SelectedImplementation
+
+T = TypeVar("T")
 
 
 class DiamondDevOrchestrator:
@@ -61,36 +53,141 @@ class DiamondDevOrchestrator:
         self,
         *,
         cwd: Path | None = None,
+        config_path: Path | None = None,
+        report_path: Path | None = None,
         runner: CommandRunner | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """Create an orchestrator."""
         self.cwd = cwd or Path.cwd()
+        self.config_path = config_path
         self.runner = runner or CommandRunner(self.cwd / "logs")
         self.git = GitOperations(self.runner)
+        self.report_path = report_path or _default_report_path(self.runner, self.cwd)
         self.sleep = sleep
 
     def run(self, plan_path: Path) -> int:
         """Run the Diamond Dev workflow for a markdown plan."""
-        resolved_plan_path = resolve_plan_path(cwd=self.cwd, plan_path=plan_path)
-        config = load_config(self.cwd)
-        context = build_run_context(
-            cwd=self.cwd,
-            plan_path=resolved_plan_path,
-            config=config,
-        )
+        started_at = datetime.now(UTC)
+        started_monotonic = time.perf_counter()
+        phase_timings: list[PhaseTiming] = []
+        context: RunContext | None = None
+        selected: SelectedImplementation | None = None
+        preflight_summary: PreflightSummary | None = None
+        status: RunStatus = "failed"
+        error: str | None = None
 
-        self._validate_initial_state(context)
-        self._prepare_notes_with_plan(context)
-        context = self._prepare_implementation_clones(context)
-        context = self._run_initial_agents(context)
-        self._run_gemini_comparison(context)
-        accepted_agent = self._poll_acceptance(context)
-        selected = selected_implementation(context, accepted_agent)
-        context = self._run_opposite_agent(context, selected)
-        self._run_review_phases(context, selected)
-        self._finalize_pr(context, selected)
-        return 0
+        try:
+            resolved_plan_path = self._timed_phase(
+                phase_timings,
+                "resolve plan",
+                lambda: workflow.resolve_plan_path(
+                    cwd=self.cwd,
+                    plan_path=plan_path,
+                ),
+            )
+            config = self._timed_phase(
+                phase_timings,
+                "load config",
+                lambda: load_config(self.cwd, self.config_path),
+            )
+            active_context = self._timed_phase(
+                phase_timings,
+                "build context",
+                lambda: workflow.build_run_context(
+                    cwd=self.cwd,
+                    plan_path=resolved_plan_path,
+                    config=config,
+                ),
+            )
+            context = active_context
+            self._timed_phase(
+                phase_timings,
+                "validate initial state",
+                lambda: self._validate_initial_state(active_context),
+            )
+            preflight_summary = self._timed_phase(
+                phase_timings,
+                "preflight",
+                lambda: run_preflight(runner=self.runner, cwd=self.cwd),
+            )
+            self._timed_phase(
+                phase_timings,
+                "prepare notes",
+                lambda: self._prepare_notes_with_plan(active_context),
+            )
+            active_context = self._timed_phase(
+                phase_timings,
+                "prepare implementation clones",
+                lambda: self._prepare_implementation_clones(active_context),
+            )
+            context = active_context
+            active_context = self._timed_phase(
+                phase_timings,
+                "run initial agents",
+                lambda: self._run_initial_agents(active_context),
+            )
+            context = active_context
+            self._timed_phase(
+                phase_timings,
+                "run gemini comparison",
+                lambda: self._run_gemini_comparison(active_context),
+            )
+            accepted_agent = self._timed_phase(
+                phase_timings,
+                "poll acceptance",
+                lambda: self._poll_acceptance(active_context),
+            )
+            selected_implementation = workflow.selected_implementation(
+                active_context,
+                accepted_agent,
+            )
+            selected = selected_implementation
+            active_context = self._timed_phase(
+                phase_timings,
+                "run comparison implementation",
+                lambda: self._run_opposite_agent(
+                    active_context,
+                    selected_implementation,
+                ),
+            )
+            context = active_context
+            self._timed_phase(
+                phase_timings,
+                "run review phases",
+                lambda: self._run_review_phases(
+                    active_context,
+                    selected_implementation,
+                ),
+            )
+            active_context = self._timed_phase(
+                phase_timings,
+                "finalize pull request",
+                lambda: self._finalize_pr(active_context, selected_implementation),
+            )
+            context = active_context
+            status = "succeeded"
+        except (Exception,) as run_error:
+            error = str(run_error)
+            raise
+        else:
+            return 0
+        finally:
+            self._write_report(
+                RunReport(
+                    path=self.report_path,
+                    status=status,
+                    started_at=started_at,
+                    finished_at=datetime.now(UTC),
+                    duration_seconds=time.perf_counter() - started_monotonic,
+                    phase_timings=phase_timings,
+                    context=context,
+                    selected=selected,
+                    preflight_summary=preflight_summary,
+                    command_logs=_command_log_records(self.runner),
+                    error=error,
+                ),
+            )
 
     def _validate_initial_state(self, context: RunContext) -> None:
         for clone_dir in (
@@ -101,6 +198,33 @@ class DiamondDevOrchestrator:
                 raise DiamondDevError(
                     f"Implementation clone already exists: {clone_dir}",
                 )
+
+    def _timed_phase(
+        self,
+        phase_timings: list[PhaseTiming],
+        name: str,
+        action: Callable[[], T],
+    ) -> T:
+        phase_started = time.perf_counter()
+        try:
+            return action()
+        finally:
+            phase_timings.append(
+                PhaseTiming(
+                    name=name,
+                    duration_seconds=time.perf_counter() - phase_started,
+                ),
+            )
+
+    def _write_report(self, report: RunReport) -> None:
+        try:
+            write_run_report(report)
+        except (OSError, TypeError, ValueError) as report_error:
+            logger.warning(
+                "Could not write run report {}: {}",
+                self.report_path,
+                report_error,
+            )
 
     def _prepare_notes_with_plan(self, context: RunContext) -> None:
         self._ensure_notes_repo(context)
@@ -280,6 +404,13 @@ class DiamondDevOrchestrator:
             )
             self.sleep(delay_seconds)
             self.git.sync_notes(context.notes.directory)
+            if not context.notes.comparison_file.is_file():
+                logger.warning(
+                    "Comparison file {} not found in notes repository",
+                    context.notes.comparison_file,
+                )
+                continue
+
             comparison_markdown = context.notes.comparison_file.read_text(
                 encoding="utf-8",
             )
@@ -454,7 +585,7 @@ class DiamondDevOrchestrator:
         )
 
         pr_title = f"Implement {context.plan.path.stem}"
-        pr_body = build_pr_body(context, selected)
+        pr_body = pr.build_pr_body(context, selected)
         pr_result = self.runner.run(
             build_gh_pr_create_command(
                 base_branch=context.implementation.base_branch,
@@ -465,7 +596,8 @@ class DiamondDevOrchestrator:
             cwd=selected.repo_dir,
             log_name="gh-pr-create",
         )
-        pr_number = parse_pr_number(pr_result.output)
+        pr_url = pr.parse_pr_url(pr_result.output)
+        pr_number = pr.parse_pr_number(pr_result.output)
         notify_url(context.config.notifications.open_pr_url, label="open pr")
 
         try:
@@ -479,7 +611,7 @@ class DiamondDevOrchestrator:
                 "Final interactive Claude review failed: {}",
                 error,
             )
-        return context
+        return context.with_pr_url(pr_url)
 
     def _run_agent(
         self,
@@ -495,3 +627,21 @@ class DiamondDevOrchestrator:
             case "claude":
                 command = build_claude_print_command(prompt)
         return self.runner.run(command, cwd=repo_dir, log_name=log_name)
+
+
+def _default_report_path(runner: object, cwd: Path) -> Path:
+    log_dir = getattr(runner, "log_dir", cwd / "logs")
+    if isinstance(log_dir, Path):
+        return log_dir / "run-report.json"
+    return cwd / "logs" / "run-report.json"
+
+
+def _command_log_records(runner: object) -> tuple[CommandLogRecord, ...]:
+    command_logs = getattr(runner, "command_logs", ())
+    if not isinstance(command_logs, list | tuple):
+        return ()
+    return tuple(
+        command_log
+        for command_log in command_logs
+        if isinstance(command_log, CommandLogRecord)
+    )

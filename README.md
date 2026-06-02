@@ -13,7 +13,14 @@ diamond-dev path/to/my-plan.md
 ```
 
 The command must be run from a directory containing `.diamond-dev.toml`. It takes
-exactly one argument: a path to a `.md` plan file.
+a path to a `.md` plan file.
+
+Useful flags:
+
+- `--config PATH`: Load configuration from a specific TOML file instead of
+  `.diamond-dev.toml` in the current directory. Relative paths resolve from the
+  invocation directory.
+- `--version`: Show the installed `diamond-dev` version.
 
 ## Configuration
 
@@ -107,6 +114,9 @@ needed:
 - `coderabbit`
 - `gh`
 
+Before cloning or launching agents, `diamond-dev` runs a fast preflight that
+checks these commands are available on `PATH` and verifies `gh auth status`.
+
 Agent subprocess logs are written under `logs/` and streamed through Loguru.
 Agents commit their changes; `diamond-dev` pushes committed work. If uncommitted
 files remain, they are logged and included in the final PR body.
@@ -116,6 +126,10 @@ files remain, they are logged and included in the final PR body.
 diamond-dev uses Loguru for console, readable text file, and JSONL file logging.
 Logs are written to stderr, `logs/diamond-dev.log`, and
 `logs/diamond-dev.jsonl` by default.
+
+Each run also writes `logs/run-report.json`, a structured summary containing the
+run status, chosen agent, branches, PR URL, dirty-file records, per-phase
+timings, preflight details, and per-step command log paths.
 
 Configure logging with environment variables:
 

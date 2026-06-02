@@ -49,7 +49,21 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
         "https://example.test/review"
     )
     assert config.notifications.open_pr_url == "https://example.test/open-pr"
-    assert config.notify_open_pr_url == "https://example.test/open-pr"
+
+
+def test_load_config_reads_explicit_relative_config_path(tmp_path: Path) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    config_path = config_dir / "diamond.toml"
+    config_path.write_text(
+        'repository_url = "git@github.com:owner/repo.git"',
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path, Path("configs/diamond.toml"))
+
+    assert config.config_path == config_path
+    assert config.config_dir == config_dir
 
 
 def test_load_config_rejects_non_string_optional_value(tmp_path: Path) -> None:

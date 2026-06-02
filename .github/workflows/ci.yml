@@ -7,13 +7,13 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
   lint-type-test:
     name: Lint, type check, and test
     runs-on: ubuntu-latest
+    outputs:
+      pylint_exit_code: ${{ steps.pylint.outputs.exit_code }}
 
     steps:
       - name: Check out repository
@@ -45,22 +45,14 @@ jobs:
           echo "exit_code=${exit_code}" >> "${GITHUB_OUTPUT}"
           exit "${exit_code}"
 
-      - name: Comment on PR when Pylint fails
-        if: github.event_name == 'pull_request' && steps.pylint.outputs.exit_code != '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          {
-            echo "## Pylint failed"
-            echo
-            echo "Pylint failed in ${GITHUB_WORKFLOW} for ${GITHUB_SHA}."
-            echo
-            echo '```text'
-            tail -c 60000 pylint-report.txt
-            echo '```'
-          } > pylint-pr-comment.md
-          gh pr comment "${PR_NUMBER}" --body-file pylint-pr-comment.md
+      - name: Upload Pylint report
+        if: steps.pylint.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pylint-report
+          path: pylint-report.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Fail if Pylint failed
         if: steps.pylint.outputs.exit_code != '0'
@@ -84,3 +76,35 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  pylint-pr-comment:
+    name: Comment on PR when Pylint fails
+    needs: lint-type-test
+    if: ${{ always() && github.event_name == 'pull_request' && needs.lint-type-test.outputs.pylint_exit_code != '' && needs.lint-type-test.outputs.pylint_exit_code != '0' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Download Pylint report
+        uses: actions/download-artifact@v4
+        with:
+          name: pylint-report
+
+      - name: Comment on PR when Pylint fails
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## Pylint failed"
+            echo
+            echo "Pylint failed in ${GITHUB_WORKFLOW} for ${GITHUB_SHA}."
+            echo
+            echo '```text'
+            tail -c 60000 pylint-report.txt
+            echo '```'
+          } > pylint-pr-comment.md
+          gh pr comment "${PR_NUMBER}" --body-file pylint-pr-comment.md
