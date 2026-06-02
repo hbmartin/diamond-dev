@@ -10,6 +10,9 @@ from diamond_dev.executor import CommandResult, CommandRunner
 from diamond_dev.orchestrator import (
     DiamondDevOrchestrator,
     DirtyRecord,
+    ImplementationContext,
+    NotesContext,
+    PlanContext,
     RunContext,
     SelectedImplementation,
     build_pr_body,
@@ -73,18 +76,24 @@ def build_context(tmp_path: Path) -> RunContext:
     return RunContext(
         cwd=tmp_path,
         config=config,
-        plan_path=tmp_path / "My Plan.md",
-        plan_slug="my-plan",
-        notes_url="git@github.com:owner/repo.wiki.git",
-        notes_dir=tmp_path / "repo.wiki",
-        codex_dir=tmp_path / "codex-my-plan",
-        claude_dir=tmp_path / "claude-my-plan",
-        codex_branch="codex/my-plan",
-        claude_branch="claude/my-plan",
+        plan=PlanContext(
+            path=tmp_path / "My Plan.md",
+            slug="my-plan",
+        ),
+        notes=NotesContext(
+            url="git@github.com:owner/repo.wiki.git",
+            directory=tmp_path / "repo.wiki",
+            comparison_file=tmp_path / "repo.wiki" / "my-plan-comparison.md",
+            review_file=tmp_path / "repo.wiki" / "my-plan-review.md",
+        ),
+        implementation=ImplementationContext(
+            codex_dir=tmp_path / "codex-my-plan",
+            claude_dir=tmp_path / "claude-my-plan",
+            codex_branch="codex/my-plan",
+            claude_branch="claude/my-plan",
+            base_branch="main",
+        ),
         comparison_file=tmp_path / "comparison.md",
-        notes_comparison_file=tmp_path / "repo.wiki" / "my-plan-comparison.md",
-        notes_review_file=tmp_path / "repo.wiki" / "my-plan-review.md",
-        base_branch="main",
     )
 
 
@@ -116,7 +125,7 @@ def test_commit_if_changes_skips_missing_untracked_paths(tmp_path: Path) -> None
     runner.run(("git", "init"), cwd=tmp_path, log_name="git-init")
     orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
 
-    committed = orchestrator._commit_if_changes(  # noqa: SLF001
+    committed = orchestrator.git.commit_if_changes(
         tmp_path,
         message="cleanup",
         log_prefix="cleanup",
@@ -158,8 +167,8 @@ def test_finalize_pr_records_dirty_files_and_still_pushes(
         assert log_name == "final selected branch-dirty-status"
         return ("src/dirty.py",)
 
-    monkeypatch.setattr(orchestrator, "_commit_if_changes", no_commit)
-    monkeypatch.setattr(orchestrator, "_dirty_files", dirty_files)
+    monkeypatch.setattr(orchestrator.git, "commit_if_changes", no_commit)
+    monkeypatch.setattr(orchestrator.git, "dirty_files", dirty_files)
 
     orchestrator._finalize_pr(context, selected)  # noqa: SLF001
 

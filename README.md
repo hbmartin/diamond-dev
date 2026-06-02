@@ -38,6 +38,27 @@ Optional keys:
 Notification URLs are best-effort GET requests. Failures are logged but do not
 stop the workflow.
 
+## Prompts
+
+Built-in prompt sources:
+
+- [Initial implementation prompt](diamond_dev/commands.py#L88-L93): asks Codex
+  and Claude to implement the plan and commit without pushing.
+- [Comparison follow-up prompt](diamond_dev/commands.py#L96-L102): asks the
+  opposite agent to apply requested follow-up changes from the comparison.
+- [Review judgment prompt](diamond_dev/commands.py#L105-L113): asks Codex to
+  classify CodeRabbit review findings.
+- [Review fix prompt](diamond_dev/commands.py#L116-L123): asks Codex to
+  implement accepted review fixes.
+- [Gemini comparison prompt wrapper](diamond_dev/commands.py#L126-L141): adds
+  required branch, repository, and output-file context to the Gemini prompt.
+- [Fallback Gemini comparison prompt](diamond_dev/commands.py#L144-L150): used
+  when `gemini_comparison_prompt_file` is unset or empty.
+
+The optional [Gemini comparison prompt file](diamond_dev/config.py#L85-L96) can
+replace the fallback comparison instructions while keeping the required context
+wrapper.
+
 ## Generated Repositories
 
 For a plan named `My Plan.md`, the command uses the slug `my-plan` and creates:

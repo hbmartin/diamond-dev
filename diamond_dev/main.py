@@ -9,7 +9,7 @@ from argparse import ArgumentParser, Namespace
 from collections.abc import Callable, Mapping, Sequence
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, TextIO
+from typing import TYPE_CHECKING, Final, Protocol, TextIO
 
 from loguru import logger
 
@@ -35,6 +35,18 @@ FILE_LOG_FORMAT: Final = (
     "trace_sampled={extra[otelTraceSampled]} "
     "service={extra[otelServiceName]} | {message}\n{exception}"
 )
+
+class _ShowWarningHook(Protocol):
+    # pylint: disable-next=too-many-positional-arguments
+    def __call__(  # noqa: PLR0913
+        self,
+        message: Warning | str,
+        category: type[Warning],
+        filename: str,
+        lineno: int,
+        file: TextIO | None = None,
+        line: str | None = None,
+    ) -> None: ...
 
 
 def configure_logging(
@@ -65,7 +77,8 @@ def configure_logging(
 
     logger.remove()
     logger.configure(patcher=_trace_context_patcher())
-    warnings.showwarning = _showwarning
+    showwarning: _ShowWarningHook = _showwarning
+    setattr(warnings, "showwarning", showwarning)  # noqa: B010
     logger.add(
         sys.stderr,
         level=selected_log_level,
@@ -186,6 +199,7 @@ def _format_otel_id(value: object, *, width: int) -> str:
     return format(value, f"0{width}x") if isinstance(value, int) else "0"
 
 
+# pylint: disable-next=too-many-positional-arguments
 def _showwarning(  # noqa: PLR0913
     message: Warning | str,
     category: type[Warning],

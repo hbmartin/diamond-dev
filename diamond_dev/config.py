@@ -13,6 +13,17 @@ CONFIG_FILE_NAME: Final = ".diamond-dev.toml"
 
 
 @dataclass(frozen=True, slots=True)
+class NotificationConfig:
+    """Best-effort notification webhook settings."""
+
+    initial_implementation_url: str | None = None
+    comparison_url: str | None = None
+    comparison_implementation_url: str | None = None
+    review_input_needed_url: str | None = None
+    open_pr_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class DiamondDevConfig:
     """Typed `.diamond-dev.toml` settings."""
 
@@ -20,11 +31,7 @@ class DiamondDevConfig:
     repository_url: str
     notes_repository_url: str | None = None
     gemini_comparison_prompt_file: str | None = None
-    notify_initial_implementation_url: str | None = None
-    notify_comparison_url: str | None = None
-    notify_comparison_implementation_url: str | None = None
-    notify_review_input_needed_url: str | None = None
-    notify_open_pr_url: str | None = None
+    notifications: NotificationConfig = NotificationConfig()
 
     @property
     def config_dir(self) -> Path:
@@ -40,6 +47,31 @@ class DiamondDevConfig:
         if prompt_path.is_absolute():
             return prompt_path
         return self.config_dir / prompt_path
+
+    @property
+    def notify_initial_implementation_url(self) -> str | None:
+        """Return the initial-implementation notification URL."""
+        return self.notifications.initial_implementation_url
+
+    @property
+    def notify_comparison_url(self) -> str | None:
+        """Return the comparison-ready notification URL."""
+        return self.notifications.comparison_url
+
+    @property
+    def notify_comparison_implementation_url(self) -> str | None:
+        """Return the comparison-implementation notification URL."""
+        return self.notifications.comparison_implementation_url
+
+    @property
+    def notify_review_input_needed_url(self) -> str | None:
+        """Return the review-input-needed notification URL."""
+        return self.notifications.review_input_needed_url
+
+    @property
+    def notify_open_pr_url(self) -> str | None:
+        """Return the open-pull-request notification URL."""
+        return self.notifications.open_pr_url
 
 
 def load_config(cwd: Path) -> DiamondDevConfig:
@@ -65,20 +97,7 @@ def load_config(cwd: Path) -> DiamondDevConfig:
             raw_config,
             "gemini_comparison_prompt_file",
         ),
-        notify_initial_implementation_url=_optional_string(
-            raw_config,
-            "notify_initial_implementation_url",
-        ),
-        notify_comparison_url=_optional_string(raw_config, "notify_comparison_url"),
-        notify_comparison_implementation_url=_optional_string(
-            raw_config,
-            "notify_comparison_implementation_url",
-        ),
-        notify_review_input_needed_url=_optional_string(
-            raw_config,
-            "notify_review_input_needed_url",
-        ),
-        notify_open_pr_url=_optional_string(raw_config, "notify_open_pr_url"),
+        notifications=_load_notifications(raw_config),
     )
 
 
@@ -112,3 +131,22 @@ def _optional_string(raw_config: dict[str, Any], key: str) -> str | None:
         stripped_value = value.strip()
         return stripped_value or None
     raise ConfigError(f"Optional config key `{key}` must be a string when set")
+
+
+def _load_notifications(raw_config: dict[str, Any]) -> NotificationConfig:
+    return NotificationConfig(
+        initial_implementation_url=_optional_string(
+            raw_config,
+            "notify_initial_implementation_url",
+        ),
+        comparison_url=_optional_string(raw_config, "notify_comparison_url"),
+        comparison_implementation_url=_optional_string(
+            raw_config,
+            "notify_comparison_implementation_url",
+        ),
+        review_input_needed_url=_optional_string(
+            raw_config,
+            "notify_review_input_needed_url",
+        ),
+        open_pr_url=_optional_string(raw_config, "notify_open_pr_url"),
+    )

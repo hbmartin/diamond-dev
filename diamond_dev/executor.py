@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 from collections.abc import Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
@@ -27,30 +28,44 @@ class CommandResult:
 
 
 @dataclass(slots=True)
-class ManagedProcess:
-    """Started command whose output is streamed on a background thread."""
+class ProcessMetadata:
+    """Immutable identifying information for a managed process."""
 
     command: tuple[str, ...]
     cwd: Path
     label: str
+    log_path: Path
+
+
+@dataclass(slots=True)
+class ProcessResources:
+    """Open resources owned by a managed process."""
+
     process: subprocess.Popen[str]
     output_stream: IO[str]
     log_file: IO[str]
-    log_path: Path
     output_thread: Thread
+
+
+@dataclass(slots=True)
+class ManagedProcess:
+    """Started command whose output is streamed on a background thread."""
+
+    metadata: ProcessMetadata
+    resources: ProcessResources
 
     def wait(self) -> CommandResult:
         """Wait for the process to exit and return its result."""
-        returncode = self.process.wait()
-        self.output_thread.join()
-        self.output_stream.close()
-        self.log_file.close()
+        returncode = self.resources.process.wait()
+        self.resources.output_thread.join()
+        self.resources.output_stream.close()
+        self.resources.log_file.close()
 
         result = CommandResult(
-            command=self.command,
-            cwd=self.cwd,
+            command=self.metadata.command,
+            cwd=self.metadata.cwd,
             returncode=returncode,
-            log_path=self.log_path,
+            log_path=self.metadata.log_path,
             output="",
         )
         if returncode != 0:
@@ -114,6 +129,7 @@ class CommandRunner:
         log_file = log_path.open("w", encoding="utf-8")
         logger.info("Starting {}: {}", log_name, shlex.join(command_tuple))
         try:
+            # pylint: disable-next=consider-using-with
             process = subprocess.Popen(  # noqa: S603
                 command_tuple,
                 cwd=cwd,
@@ -147,14 +163,18 @@ class CommandRunner:
         )
         output_thread.start()
         return ManagedProcess(
-            command=command_tuple,
-            cwd=cwd,
-            label=log_name,
-            process=process,
-            output_stream=process.stdout,
-            log_file=log_file,
-            log_path=log_path,
-            output_thread=output_thread,
+            metadata=ProcessMetadata(
+                command=command_tuple,
+                cwd=cwd,
+                label=log_name,
+                log_path=log_path,
+            ),
+            resources=ProcessResources(
+                process=process,
+                output_stream=process.stdout,
+                log_file=log_file,
+                output_thread=output_thread,
+            ),
         )
 
     def run_interactive(
@@ -210,22 +230,25 @@ class CommandRunner:
         logger.info("Running {}: {}", log_name, shlex.join(command))
         captured_output: list[str] | None = [] if output_path is None else None
 
-        with log_path.open("w", encoding="utf-8") as log_file:
-            output_file = (
-                output_path.open("w", encoding="utf-8") if output_path else None
-            )
+        with ExitStack() as stack:
+            log_file = stack.enter_context(log_path.open("w", encoding="utf-8"))
+            output_file = None
+            if output_path is not None:
+                output_file = stack.enter_context(
+                    output_path.open("w", encoding="utf-8"),
+                )
             try:
-                process = subprocess.Popen(  # noqa: S603
-                    command,
-                    cwd=cwd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
+                process = stack.enter_context(
+                    subprocess.Popen(  # noqa: S603
+                        command,
+                        cwd=cwd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    ),
                 )
             except (OSError, ValueError) as error:
-                if output_file is not None:
-                    output_file.close()
                 raise CommandFailureError(
                     command=shlex.join(command),
                     cwd=str(cwd),
@@ -234,8 +257,6 @@ class CommandRunner:
                 ) from error
 
             if process.stdout is None:
-                if output_file is not None:
-                    output_file.close()
                 raise CommandFailureError(
                     command=shlex.join(command),
                     cwd=str(cwd),
@@ -243,20 +264,13 @@ class CommandRunner:
                     log_path=str(log_path),
                 )
 
-            try:
-                for line in process.stdout:
-                    if captured_output is not None:
-                        captured_output.append(line)
-                    log_file.write(line)
-                    log_file.flush()
-                    if output_file is not None:
-                        output_file.write(line)
-                        output_file.flush()
-                    logger.info("[{}] {}", log_name, line.rstrip("\n"))
-            finally:
-                process.stdout.close()
-                if output_file is not None:
-                    output_file.close()
+            _stream_command_output(
+                output_stream=process.stdout,
+                log_file=log_file,
+                output_file=output_file,
+                captured_output=captured_output,
+                label=log_name,
+            )
 
             returncode = process.wait()
 
@@ -289,6 +303,28 @@ def _stream_output(output_stream: IO[str], log_file: IO[str], label: str) -> Non
         log_file.write(line)
         log_file.flush()
         logger.info("[{}] {}", label, line.rstrip("\n"))
+
+
+def _stream_command_output(
+    *,
+    output_stream: IO[str],
+    log_file: IO[str],
+    output_file: IO[str] | None,
+    captured_output: list[str] | None,
+    label: str,
+) -> None:
+    try:
+        for line in output_stream:
+            if captured_output is not None:
+                captured_output.append(line)
+            log_file.write(line)
+            log_file.flush()
+            if output_file is not None:
+                output_file.write(line)
+                output_file.flush()
+            logger.info("[{}] {}", label, line.rstrip("\n"))
+    finally:
+        output_stream.close()
 
 
 def _command_failure(result: CommandResult) -> CommandFailureError:

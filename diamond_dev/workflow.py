@@ -1,0 +1,157 @@
+"""Workflow data structures for Diamond Dev orchestration."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from diamond_dev.errors import DiamondDevError
+from diamond_dev.naming import (
+    derive_notes_repository_url,
+    notes_directory_name,
+    slug_for_plan,
+)
+
+if TYPE_CHECKING:
+    from diamond_dev.acceptance import AgentChoice
+    from diamond_dev.config import DiamondDevConfig
+
+
+@dataclass(slots=True)
+class DirtyRecord:
+    """Uncommitted files observed after an agent phase."""
+
+    label: str
+    branch: str
+    files: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PlanContext:
+    """Resolved plan file identity."""
+
+    path: Path
+    slug: str
+
+    @property
+    def file_name(self) -> str:
+        """Return the source plan filename."""
+        return self.path.name
+
+    @property
+    def comparison_file_name(self) -> str:
+        """Return the implementation-repo comparison filename."""
+        return f"{self.slug}-comparison.md"
+
+    @property
+    def review_file_name(self) -> str:
+        """Return the implementation-repo review filename."""
+        return f"{self.slug}-review.md"
+
+
+@dataclass(frozen=True, slots=True)
+class NotesContext:
+    """Resolved notes repository paths."""
+
+    url: str
+    directory: Path
+    comparison_file: Path
+    review_file: Path
+
+
+@dataclass(slots=True)
+class ImplementationContext:
+    """Resolved implementation repository paths and branches."""
+
+    codex_dir: Path
+    claude_dir: Path
+    codex_branch: str
+    claude_branch: str
+    base_branch: str = ""
+
+
+@dataclass(slots=True)
+class RunContext:
+    """Resolved state for one Diamond Dev run."""
+
+    cwd: Path
+    config: DiamondDevConfig
+    plan: PlanContext
+    notes: NotesContext
+    implementation: ImplementationContext
+    comparison_file: Path
+    dirty_records: list[DirtyRecord] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedImplementation:
+    """The implementation branch selected from comparison notes."""
+
+    accepted_agent: AgentChoice
+    opposite_agent: AgentChoice
+    repo_dir: Path
+    branch: str
+
+
+def resolve_plan_path(*, cwd: Path, plan_path: Path) -> Path:
+    """Resolve and validate a markdown plan path."""
+    candidate_path = plan_path if plan_path.is_absolute() else cwd / plan_path
+    resolved_path = candidate_path.resolve()
+    if not resolved_path.is_file():
+        raise DiamondDevError(f"Plan file not found: {resolved_path}")
+    if resolved_path.suffix.lower() != ".md":
+        raise DiamondDevError(f"Plan file must be markdown: {resolved_path}")
+    return resolved_path
+
+
+def build_run_context(
+    *,
+    cwd: Path,
+    plan_path: Path,
+    config: DiamondDevConfig,
+) -> RunContext:
+    """Build resolved workflow context from config and a plan path."""
+    plan_slug = slug_for_plan(plan_path)
+    notes_url = config.notes_repository_url or derive_notes_repository_url(
+        config.repository_url,
+    )
+    notes_dir = cwd / notes_directory_name(config.repository_url)
+    return RunContext(
+        cwd=cwd,
+        config=config,
+        plan=PlanContext(path=plan_path, slug=plan_slug),
+        notes=NotesContext(
+            url=notes_url,
+            directory=notes_dir,
+            comparison_file=notes_dir / f"{plan_slug}-comparison.md",
+            review_file=notes_dir / f"{plan_slug}-review.md",
+        ),
+        implementation=ImplementationContext(
+            codex_dir=cwd / f"codex-{plan_slug}",
+            claude_dir=cwd / f"claude-{plan_slug}",
+            codex_branch=f"codex/{plan_slug}",
+            claude_branch=f"claude/{plan_slug}",
+        ),
+        comparison_file=cwd / "comparison.md",
+    )
+
+
+def selected_implementation(
+    context: RunContext,
+    accepted_agent: AgentChoice,
+) -> SelectedImplementation:
+    """Return the accepted implementation repository and opposite agent."""
+    if accepted_agent == "codex":
+        return SelectedImplementation(
+            accepted_agent="codex",
+            opposite_agent="claude",
+            repo_dir=context.implementation.codex_dir,
+            branch=context.implementation.codex_branch,
+        )
+    return SelectedImplementation(
+        accepted_agent="claude",
+        opposite_agent="codex",
+        repo_dir=context.implementation.claude_dir,
+        branch=context.implementation.claude_branch,
+    )
