@@ -82,12 +82,12 @@ class DiamondDevOrchestrator:
 
         self._validate_initial_state(context)
         self._prepare_notes_with_plan(context)
-        self._prepare_implementation_clones(context)
-        self._run_initial_agents(context)
+        context = self._prepare_implementation_clones(context)
+        context = self._run_initial_agents(context)
         self._run_gemini_comparison(context)
         accepted_agent = self._poll_acceptance(context)
         selected = selected_implementation(context, accepted_agent)
-        self._run_opposite_agent(context, selected)
+        context = self._run_opposite_agent(context, selected)
         self._run_review_phases(context, selected)
         self._finalize_pr(context, selected)
         return 0
@@ -131,27 +131,28 @@ class DiamondDevOrchestrator:
             log_name="notes-clone",
         )
 
-    def _prepare_implementation_clones(self, context: RunContext) -> None:
+    def _prepare_implementation_clones(self, context: RunContext) -> RunContext:
+        implementation = context.implementation
         self.runner.run(
             (
                 "git",
                 "clone",
                 context.config.repository_url,
-                str(context.implementation.codex_dir),
+                str(implementation.codex_dir),
             ),
             cwd=context.cwd,
             log_name="codex-clone",
         )
-        context.implementation.base_branch = self.git.remote_default_branch(
-            context.implementation.codex_dir,
+        implementation = implementation.with_base_branch(
+            self.git.remote_default_branch(implementation.codex_dir),
         )
         self.git.ensure_remote_branch_absent(
-            context.implementation.codex_dir,
-            context.implementation.codex_branch,
+            implementation.codex_dir,
+            implementation.codex_branch,
         )
         self.git.ensure_remote_branch_absent(
-            context.implementation.codex_dir,
-            context.implementation.claude_branch,
+            implementation.codex_dir,
+            implementation.claude_branch,
         )
 
         self.runner.run(
@@ -159,31 +160,32 @@ class DiamondDevOrchestrator:
                 "git",
                 "clone",
                 context.config.repository_url,
-                str(context.implementation.claude_dir),
+                str(implementation.claude_dir),
             ),
             cwd=context.cwd,
             log_name="claude-clone",
         )
         self.git.checkout_branch(
-            context.implementation.codex_dir,
-            branch=context.implementation.codex_branch,
-            base_branch=context.implementation.base_branch,
+            implementation.codex_dir,
+            branch=implementation.codex_branch,
+            base_branch=implementation.base_branch,
             log_prefix="codex",
         )
         self.git.checkout_branch(
-            context.implementation.claude_dir,
-            branch=context.implementation.claude_branch,
-            base_branch=context.implementation.base_branch,
+            implementation.claude_dir,
+            branch=implementation.claude_branch,
+            base_branch=implementation.base_branch,
             log_prefix="claude",
         )
 
         for repo_dir in (
-            context.implementation.codex_dir,
-            context.implementation.claude_dir,
+            implementation.codex_dir,
+            implementation.claude_dir,
         ):
             shutil.copy2(context.plan.path, repo_dir / context.plan.file_name)
+        return context.with_implementation(implementation)
 
-    def _run_initial_agents(self, context: RunContext) -> None:
+    def _run_initial_agents(self, context: RunContext) -> RunContext:
         prompt = initial_implementation_prompt(context.plan.file_name)
         codex_process = self.runner.start(
             build_codex_command(context.implementation.codex_dir, prompt),
@@ -213,13 +215,13 @@ class DiamondDevOrchestrator:
                 f"Initial agent implementation failed: {failure_summary}",
             )
 
-        self.git.push_agent_branch(
+        context = self.git.push_agent_branch(
             context,
             label="codex initial",
             repo_dir=context.implementation.codex_dir,
             branch=context.implementation.codex_branch,
         )
-        self.git.push_agent_branch(
+        return self.git.push_agent_branch(
             context,
             label="claude initial",
             repo_dir=context.implementation.claude_dir,
@@ -292,7 +294,7 @@ class DiamondDevOrchestrator:
         self,
         context: RunContext,
         selected: SelectedImplementation,
-    ) -> None:
+    ) -> RunContext:
         plan_file = selected.repo_dir / context.plan.file_name
         plan_file.unlink(missing_ok=True)
         self.git.commit_if_changes(
@@ -320,7 +322,7 @@ class DiamondDevOrchestrator:
                 error,
             )
 
-        self.git.push_agent_branch(
+        context = self.git.push_agent_branch(
             context,
             label=f"{selected.opposite_agent} comparison",
             repo_dir=selected.repo_dir,
@@ -346,6 +348,7 @@ class DiamondDevOrchestrator:
             context.config.notifications.comparison_implementation_url,
             label="comparison implementation",
         )
+        return context
 
     def _run_review_phases(
         self,
@@ -361,7 +364,7 @@ class DiamondDevOrchestrator:
                 output_path=review_file,
             )
         except (CommandFailureError,) as error:
-            logger.opt(exception=error).warning(
+            logger.warning(
                 "CodeRabbit review failed; continuing where possible: {}",
                 error,
             )
@@ -417,7 +420,7 @@ class DiamondDevOrchestrator:
         self,
         context: RunContext,
         selected: SelectedImplementation,
-    ) -> None:
+    ) -> RunContext:
         for artifact_name in (
             context.plan.file_name,
             context.plan.comparison_file_name,
@@ -435,7 +438,7 @@ class DiamondDevOrchestrator:
                 context.plan.review_file_name,
             ),
         )
-        self.git.record_dirty_files(
+        context = self.git.record_dirty_files(
             context,
             "final selected branch",
             selected.repo_dir,
@@ -476,6 +479,7 @@ class DiamondDevOrchestrator:
                 "Final interactive Claude review failed: {}",
                 error,
             )
+        return context
 
     def _run_agent(
         self,

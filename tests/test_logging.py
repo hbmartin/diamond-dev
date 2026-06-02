@@ -10,7 +10,7 @@ from loguru import logger
 
 from diamond_dev import main as main_module
 from diamond_dev.errors import DiamondDevError
-from diamond_dev.main import configure_logging
+from diamond_dev.logging_setup import configure_logging
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,7 +78,7 @@ def test_warnings_are_captured_by_loguru(tmp_path: Path) -> None:
     assert "UserWarning: warning bridge smoke" in text_log
 
 
-def test_main_logs_diamond_dev_errors_with_traceback(
+def test_main_logs_diamond_dev_errors_without_traceback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -100,8 +100,8 @@ def test_main_logs_diamond_dev_errors_with_traceback(
     assert exit_code == 1
     text_log = log_file.read_text(encoding="utf-8")
     assert "Diamond Dev failed: planned failure" in text_log
-    assert "Traceback" in text_log
-    assert "DiamondDevError: planned failure" in text_log
+    assert "Traceback" not in text_log
+    assert "DiamondDevError: planned failure" not in text_log
 
 
 def _read_first_json_payload(json_log_file: Path) -> dict[str, Any]:

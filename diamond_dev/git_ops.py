@@ -148,9 +148,9 @@ class GitOperations:
         label: str,
         repo_dir: Path,
         branch: str,
-    ) -> None:
+    ) -> RunContext:
         """Record dirty files, then push a workflow branch."""
-        self.record_dirty_files(context, label, repo_dir, branch)
+        updated_context = self.record_dirty_files(context, label, repo_dir, branch)
         self.run(
             repo_dir,
             "push",
@@ -159,6 +159,7 @@ class GitOperations:
             branch,
             log_name=f"{label}-push",
         )
+        return updated_context
 
     def record_dirty_files(
         self,
@@ -166,20 +167,20 @@ class GitOperations:
         label: str,
         repo_dir: Path,
         branch: str,
-    ) -> None:
+    ) -> RunContext:
         """Append dirty files observed after an agent phase."""
         dirty_files = self.dirty_files(repo_dir, log_name=f"{label}-dirty-status")
         if not dirty_files:
-            return
+            return context
 
-        context.dirty_records.append(
-            DirtyRecord(label=label, branch=branch, files=dirty_files),
-        )
+        dirty_record = DirtyRecord(label=label, branch=branch, files=dirty_files)
+        updated_context = context.with_dirty_record(dirty_record)
         logger.warning(
             "Dirty files remain after {} and will not be pushed: {}",
             label,
             ", ".join(dirty_files),
         )
+        return updated_context
 
     def dirty_files(self, repo_dir: Path, *, log_name: str) -> tuple[str, ...]:
         """Return path names from git status porcelain output."""

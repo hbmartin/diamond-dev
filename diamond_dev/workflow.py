@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from diamond_dev.config import DiamondDevConfig
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class DirtyRecord:
     """Uncommitted files observed after an agent phase."""
 
@@ -60,7 +60,7 @@ class NotesContext:
     review_file: Path
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ImplementationContext:
     """Resolved implementation repository paths and branches."""
 
@@ -70,8 +70,12 @@ class ImplementationContext:
     claude_branch: str
     base_branch: str = ""
 
+    def with_base_branch(self, base_branch: str) -> ImplementationContext:
+        """Return a copy with the resolved remote base branch."""
+        return replace(self, base_branch=base_branch)
 
-@dataclass(slots=True)
+
+@dataclass(frozen=True, slots=True)
 class RunContext:
     """Resolved state for one Diamond Dev run."""
 
@@ -81,7 +85,21 @@ class RunContext:
     notes: NotesContext
     implementation: ImplementationContext
     comparison_file: Path
-    dirty_records: list[DirtyRecord] = field(default_factory=list)
+    dirty_records: tuple[DirtyRecord, ...] = ()
+
+    def with_implementation(
+        self,
+        implementation: ImplementationContext,
+    ) -> RunContext:
+        """Return a copy with updated implementation repository details."""
+        return replace(self, implementation=implementation)
+
+    def with_dirty_record(self, dirty_record: DirtyRecord) -> RunContext:
+        """Return a copy with an added dirty-file record."""
+        return replace(
+            self,
+            dirty_records=(*self.dirty_records, dirty_record),
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Final
-from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
@@ -42,5 +41,5 @@ def notify_url(url: str | None, *, label: str, timeout: float = 10.0) -> None:
                 label,
                 response.status,
             )
-    except (OSError, TimeoutError, URLError, ValueError) as error:
+    except (OSError, ValueError) as error:
         logger.opt(exception=error).warning("Notification {} failed: {}", label, error)

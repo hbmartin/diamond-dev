@@ -65,7 +65,24 @@ project-includes = [
 ]
 
 [tool.pylint.main]
-fail-on = ["R0801", "R0401"]
+fail-on = [
+    "C0203",
+    "E0203",
+    "E0701",
+    "R0401",
+    "R0801",
+    "R0901",
+    "W0201",
+    "W0237",
+    "W0631",
+    "W0641",
+    "W1114",
+    "W1509",
+    "W3101",
+    "W4901",
+    "W4902",
+    "W4905",
+]
 
 [tool.pylint."messages control"]
 disable = ["R0903", "R0913"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Final
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 from diamond_dev.errors import UrlDerivationError
 
@@ -14,6 +14,10 @@ _SCP_GITHUB_PATTERN: Final = re.compile(
     r"^(?P<prefix>(?:[^@]+@)?github\.com:)"
     r"(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$",
 )
+_SCP_REMOTE_PATTERN: Final = re.compile(
+    r"^(?:[^@/\s:]+@)?(?P<host>[^@/\s:]+):(?P<path>[^\s:]+)$",
+)
+_GIT_URL_SCHEMES: Final = frozenset({"file", "git", "http", "https", "ssh"})
 
 
 def slug_for_plan(plan_path: Path) -> str:
@@ -40,6 +44,31 @@ def repository_name_from_url(repository_url: str) -> str:
             f"Could not derive repository name from {repository_url}",
         )
     return repo_name
+
+
+def is_git_remote_url(repository_url: str) -> bool:
+    """Return whether the value parses as a supported Git remote URL."""
+    cleaned_url = repository_url.strip().rstrip("/")
+    if not cleaned_url or any(character.isspace() for character in cleaned_url):
+        return False
+
+    scp_match = (
+        None if "://" in cleaned_url else _SCP_REMOTE_PATTERN.match(cleaned_url)
+    )
+    if scp_match is not None and _has_repository_path(scp_match.group("path")):
+        return True
+
+    try:
+        parsed_url = urlparse(cleaned_url)
+    except (ValueError,):
+        return False
+
+    scheme = parsed_url.scheme.lower()
+    if scheme not in _GIT_URL_SCHEMES:
+        return False
+    if scheme == "file":
+        return _has_repository_path(parsed_url.path)
+    return _has_url_host(parsed_url) and _has_repository_path(parsed_url.path)
 
 
 def notes_directory_name(repository_url: str) -> str:
@@ -77,3 +106,18 @@ def _strip_git_suffix(repo_name: str) -> str:
     if repo_name.endswith(".git"):
         return repo_name[:-4]
     return repo_name
+
+
+def _has_repository_path(path: str) -> bool:
+    path_parts = [part for part in path.rstrip("/").split("/") if part]
+    if not path_parts:
+        return False
+    return len(path_parts) > 1 or path_parts[-1].endswith(".git")
+
+
+def _has_url_host(parsed_url: ParseResult) -> bool:
+    try:
+        _ = parsed_url.port
+    except (ValueError,):
+        return False
+    return parsed_url.hostname is not None

@@ -23,6 +23,11 @@ exactly one argument: a path to a `.md` plan file.
 repository_url = "git@github.com:owner/repo.git"
 ```
 
+`repository_url` must be a Git remote URL in a supported URL form such as
+`https://github.com/owner/repo`, `ssh://git@github.com/owner/repo.git`,
+`git://host/owner/repo.git`, `file:///path/to/repo.git`, or an SCP-like form
+such as `git@github.com:owner/repo.git`.
+
 Optional keys:
 
 - `notes_repository_url`: Gollum wiki repository URL. If omitted, GitHub remotes

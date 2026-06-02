@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from diamond_dev.errors import ConfigError
+from diamond_dev.naming import is_git_remote_url
 
 CONFIG_FILE_NAME: Final = ".diamond-dev.toml"
 
@@ -88,7 +89,7 @@ def load_config(cwd: Path) -> DiamondDevConfig:
             f"Could not read config file {config_path}: {error}",
         ) from error
 
-    repository_url = _required_string(raw_config, "repository_url", config_path)
+    repository_url = _required_git_remote_url(raw_config, "repository_url", config_path)
     return DiamondDevConfig(
         config_path=config_path,
         repository_url=repository_url,
@@ -121,6 +122,17 @@ def _required_string(raw_config: dict[str, Any], key: str, config_path: Path) ->
     if isinstance(value, str) and value.strip():
         return value.strip()
     raise ConfigError(f"Config {config_path} requires a non-empty `{key}` string")
+
+
+def _required_git_remote_url(
+    raw_config: dict[str, Any],
+    key: str,
+    config_path: Path,
+) -> str:
+    value = _required_string(raw_config, key, config_path)
+    if is_git_remote_url(value):
+        return value
+    raise ConfigError(f"Config {config_path} `{key}` must be a valid Git remote URL")
 
 
 def _optional_string(raw_config: dict[str, Any], key: str) -> str | None:

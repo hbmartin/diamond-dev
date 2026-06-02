@@ -63,6 +63,23 @@ def test_load_config_rejects_non_string_optional_value(tmp_path: Path) -> None:
         load_config(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "repository_url",
+    ["owner/repo", "https://", "git@github.com"],
+)
+def test_load_config_rejects_malformed_repository_url(
+    tmp_path: Path,
+    repository_url: str,
+) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        f'repository_url = "{repository_url}"',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="valid Git remote URL"):
+        load_config(tmp_path)
+
+
 def test_load_config_wraps_malformed_toml(tmp_path: Path) -> None:
     (tmp_path / CONFIG_FILE_NAME).write_text(
         'repository_url = "git@github.com:owner/repo.git"\n[',
