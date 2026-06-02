@@ -87,15 +87,25 @@ files remain, they are logged and included in the final PR body.
 
 ## Logging
 
-diamond-dev uses Loguru for console and file logging. Logs are written to stderr
-and to `logs/diamond-dev.log` by default.
+diamond-dev uses Loguru for console, readable text file, and JSONL file logging.
+Logs are written to stderr, `logs/diamond-dev.log`, and
+`logs/diamond-dev.jsonl` by default.
 
 Configure logging with environment variables:
 
-- `DIAMOND_DEV_LOG_LEVEL`: Log level for both console and file output. Defaults to
-  `INFO`.
-- `DIAMOND_DEV_LOG_FILE`: File path for persistent logs. Defaults to
+- `DIAMOND_DEV_LOG_LEVEL`: Log level for console, text file, and JSONL output.
+  Defaults to `INFO`.
+- `DIAMOND_DEV_LOG_FILE`: File path for readable persistent logs. Defaults to
   `logs/diamond-dev.log`.
+- `DIAMOND_DEV_JSON_LOG_FILE`: File path for serialized JSONL logs. Defaults to
+  `logs/diamond-dev.jsonl`.
+- `DIAMOND_DEV_LOG_DIAGNOSE`: Whether Loguru should include local variable
+  values in exception tracebacks. Defaults to enabled. Disable with `0`,
+  `false`, `no`, or `off` if logs may contain secrets.
 
-File logs rotate at 10 MB, retain rotated files for 30 days, and compress rotated
-logs as zip files.
+File logs rotate at 10 MB, retain rotated files for 30 days, compress rotated
+logs as zip files, use UTF-8 with fallback escaping, and are created with owner
+read/write permissions. Exception logs include extended tracebacks. When
+OpenTelemetry is installed, log records include the active trace ID, span ID,
+sampled flag, and service name; otherwise those fields are present with default
+zero or empty values.

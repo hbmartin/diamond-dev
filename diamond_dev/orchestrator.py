@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import time
 from collections.abc import Callable
@@ -372,7 +373,7 @@ class DiamondDevOrchestrator:
                 log_name=f"{selected.opposite_agent}-comparison-agent",
             )
         except (CommandFailureError,) as error:
-            logger.warning(
+            logger.opt(exception=error).warning(
                 "Opposite agent failed; continuing where possible: {}",
                 error,
             )
@@ -418,7 +419,7 @@ class DiamondDevOrchestrator:
                 output_path=review_file,
             )
         except (CommandFailureError,) as error:
-            logger.warning(
+            logger.opt(exception=error).warning(
                 "CodeRabbit review failed; continuing where possible: {}",
                 error,
             )
@@ -434,7 +435,10 @@ class DiamondDevOrchestrator:
                 log_name="codex-review-judgment",
             )
         except (CommandFailureError,) as error:
-            logger.warning("Codex review judgment failed; continuing: {}", error)
+            logger.opt(exception=error).warning(
+                "Codex review judgment failed; continuing: {}",
+                error,
+            )
 
         review_markdown = review_file.read_text(encoding="utf-8")
         if "(C)" in review_markdown:
@@ -462,7 +466,10 @@ class DiamondDevOrchestrator:
                 log_name="codex-review-fixes",
             )
         except (CommandFailureError,) as error:
-            logger.warning("Codex review fixes failed; continuing: {}", error)
+            logger.opt(exception=error).warning(
+                "Codex review fixes failed; continuing: {}",
+                error,
+            )
 
     def _finalize_pr(
         self,
@@ -523,7 +530,10 @@ class DiamondDevOrchestrator:
                 log_name="claude-final-review",
             )
         except (CommandFailureError,) as error:
-            logger.warning("Final interactive Claude review failed: {}", error)
+            logger.opt(exception=error).warning(
+                "Final interactive Claude review failed: {}",
+                error,
+            )
 
     def _run_agent(
         self,
@@ -615,7 +625,7 @@ class DiamondDevOrchestrator:
             raise DiamondDevError(f"Expected remote branch already exists: {branch}")
         if result.returncode != 2:
             raise CommandFailureError(
-                command="git ls-remote --exit-code --heads origin",
+                command=shlex.join(result.command),
                 cwd=str(repo_dir),
                 returncode=result.returncode,
                 log_path=str(result.log_path),
@@ -650,12 +660,17 @@ class DiamondDevOrchestrator:
         log_prefix: str,
         paths: tuple[str, ...],
     ) -> bool:
+        committable_paths = self._committable_paths(repo_dir, paths, log_prefix)
+        if not committable_paths:
+            logger.info("No committable paths for {}", log_prefix)
+            return False
+
         self._run_git(
             repo_dir,
             "add",
             "--all",
             "--",
-            *paths,
+            *committable_paths,
             log_name=f"{log_prefix}-add",
         )
         staged_diff = self._run_git(
@@ -665,7 +680,7 @@ class DiamondDevOrchestrator:
             "--quiet",
             "--exit-code",
             "--",
-            *paths,
+            *committable_paths,
             log_name=f"{log_prefix}-staged-diff",
             check=False,
         )
@@ -674,7 +689,7 @@ class DiamondDevOrchestrator:
             return False
         if staged_diff.returncode != 1:
             raise CommandFailureError(
-                command="git diff --cached --quiet --exit-code",
+                command=shlex.join(staged_diff.command),
                 cwd=str(repo_dir),
                 returncode=staged_diff.returncode,
                 log_path=str(staged_diff.log_path),
@@ -687,6 +702,50 @@ class DiamondDevOrchestrator:
             log_name=f"{log_prefix}-commit",
         )
         return True
+
+    def _committable_paths(
+        self,
+        repo_dir: Path,
+        paths: tuple[str, ...],
+        log_prefix: str,
+    ) -> tuple[str, ...]:
+        committable_paths: list[str] = []
+        for path in paths:
+            if (repo_dir / path).exists() or self._is_tracked(
+                repo_dir,
+                path,
+                log_name=f"{log_prefix}-tracked-{path}",
+            ):
+                committable_paths.append(path)
+                continue
+
+            logger.info(
+                "Skipping missing untracked path for {}: {}",
+                log_prefix,
+                path,
+            )
+        return tuple(committable_paths)
+
+    def _is_tracked(self, repo_dir: Path, path: str, *, log_name: str) -> bool:
+        result = self._run_git(
+            repo_dir,
+            "ls-files",
+            "--error-unmatch",
+            "--",
+            path,
+            log_name=log_name,
+            check=False,
+        )
+        if result.returncode == 0:
+            return True
+        if result.returncode == 1:
+            return False
+        raise CommandFailureError(
+            command=shlex.join(result.command),
+            cwd=str(repo_dir),
+            returncode=result.returncode,
+            log_path=str(result.log_path),
+        )
 
     def _run_git(
         self,

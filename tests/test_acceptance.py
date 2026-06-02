@@ -6,6 +6,7 @@ import pytest
 
 from diamond_dev.acceptance import (
     ACCEPTANCE_CHECKBOX,
+    AgentChoice,
     acceptance_wait_delays,
     append_acceptance_checkbox,
     parse_acceptance,
@@ -30,8 +31,17 @@ def test_parse_acceptance_waiting_state() -> None:
         ("- [x] Accept: claude", "claude"),
     ],
 )
-def test_parse_acceptance_checked_values(markdown, expected) -> None:
+def test_parse_acceptance_checked_values(
+    markdown: str,
+    expected: AgentChoice,
+) -> None:
     assert parse_acceptance(markdown) == expected
+
+
+def test_parse_acceptance_ignores_non_checkbox_accept_mentions() -> None:
+    markdown = 'Please update the "Accept: codex" checkbox below.'
+
+    assert parse_acceptance(markdown) is None
 
 
 @pytest.mark.parametrize(
@@ -42,7 +52,7 @@ def test_parse_acceptance_checked_values(markdown, expected) -> None:
         "- [x] Accept: codex\n- [x] Accept: claude",
     ],
 )
-def test_parse_acceptance_rejects_malformed_values(markdown) -> None:
+def test_parse_acceptance_rejects_malformed_values(markdown: str) -> None:
     with pytest.raises(MalformedAcceptanceError):
         parse_acceptance(markdown)
 

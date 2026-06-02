@@ -17,14 +17,15 @@ from diamond_dev.commands import (
 )
 
 
-def test_build_codex_command_uses_exec_and_bypass_flag() -> None:
-    command = build_codex_command(Path("/tmp/repo"), "do work")
+def test_build_codex_command_uses_exec_and_bypass_flag(tmp_path: Path) -> None:
+    repo_dir = tmp_path / "repo"
+    command = build_codex_command(repo_dir, "do work")
 
     assert command == (
         "codex",
         "exec",
         "-C",
-        "/tmp/repo",
+        str(repo_dir),
         "--dangerously-bypass-approvals-and-sandbox",
         "do work",
     )
@@ -103,15 +104,17 @@ def test_initial_prompt_tells_agent_not_to_push() -> None:
     assert "Do not push" in prompt
 
 
-def test_gemini_prompt_includes_custom_prompt_and_context() -> None:
+def test_gemini_prompt_includes_custom_prompt_and_context(tmp_path: Path) -> None:
+    codex_dir = tmp_path / "codex-my-plan"
+    claude_dir = tmp_path / "claude-my-plan"
     prompt = gemini_comparison_prompt(
         "Custom compare rules.",
         ComparisonPromptContext(
             base_branch="main",
             codex_branch="codex/my-plan",
             claude_branch="claude/my-plan",
-            codex_dir=Path("/tmp/codex-my-plan"),
-            claude_dir=Path("/tmp/claude-my-plan"),
+            codex_dir=codex_dir,
+            claude_dir=claude_dir,
         ),
     )
 
@@ -119,3 +122,20 @@ def test_gemini_prompt_includes_custom_prompt_and_context() -> None:
     assert "codex/my-plan" in prompt
     assert "claude/my-plan" in prompt
     assert "comparison.md" in prompt
+
+
+def test_gemini_prompt_uses_fallback_for_whitespace_prompt(
+    tmp_path: Path,
+) -> None:
+    prompt = gemini_comparison_prompt(
+        "   ",
+        ComparisonPromptContext(
+            base_branch="main",
+            codex_branch="codex/my-plan",
+            claude_branch="claude/my-plan",
+            codex_dir=tmp_path / "codex-my-plan",
+            claude_dir=tmp_path / "claude-my-plan",
+        ),
+    )
+
+    assert "Compare the Codex and Claude implementation branches" in prompt

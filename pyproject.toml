@@ -18,6 +18,7 @@ diamond-dev = "diamond_dev.main:main"
 [dependency-groups]
 dev = [
     "lizard>=1.23.0",
+    "pylint>=4.0.5",
     "pyrefly>=1.0.0",
     "pyroma>=5.0.1",
     "pytest>=9.0.3",
@@ -62,3 +63,12 @@ project-includes = [
     "**/*.py*",
     "**/*.ipynb",
 ]
+
+[tool.pylint.main]
+fail-on = ["R0801", "R0401"]
+
+[tool.pylint."messages control"]
+disable = ["R0903", "R0913"]
+
+[tool.pylint.format]
+max-module-lines = 500

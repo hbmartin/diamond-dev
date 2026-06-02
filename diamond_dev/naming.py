@@ -58,7 +58,7 @@ def derive_notes_repository_url(repository_url: str) -> str:
     parsed_url = urlparse(cleaned_url)
     host = parsed_url.hostname
     path_parts = [part for part in parsed_url.path.split("/") if part]
-    if host != "github.com" or len(path_parts) < 2:
+    if host != "github.com" or len(path_parts) != 2:
         raise UrlDerivationError(
             f"Could not derive a GitHub wiki URL from {repository_url}",
         )

@@ -128,9 +128,8 @@ def gemini_comparison_prompt(
     context: ComparisonPromptContext,
 ) -> str:
     """Return the Gemini comparison prompt with mandatory run context."""
-    custom_prompt = (
-        configured_prompt.strip() if configured_prompt else _fallback_prompt()
-    )
+    stripped_prompt = configured_prompt.strip() if configured_prompt else ""
+    custom_prompt = stripped_prompt or _fallback_prompt()
     return (
         f"{custom_prompt}\n\n"
         "Required context:\n"
