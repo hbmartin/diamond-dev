@@ -32,9 +32,15 @@ from diamond_dev.workflow import (
 class _RecordingRunner:
     """Minimal command runner fake for orchestrator push tests."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        clone_lockfiles_by_dir: dict[Path, tuple[str, ...]] | None = None,
+    ) -> None:
         self.commands: list[tuple[str, ...]] = []
+        self.command_calls: list[tuple[tuple[str, ...], Path, str]] = []
         self.interactive_commands: list[tuple[str, ...]] = []
+        self.clone_lockfiles_by_dir = clone_lockfiles_by_dir or {}
 
     def run(
         self,
@@ -47,9 +53,13 @@ class _RecordingRunner:
         assert isinstance(check, bool)
         command_tuple = tuple(command)
         self.commands.append(command_tuple)
+        self.command_calls.append((command_tuple, cwd, log_name))
         output = ""
         if command_tuple[:2] == ("git", "clone"):
-            Path(command_tuple[-1]).mkdir(parents=True, exist_ok=True)
+            clone_dir = Path(command_tuple[-1])
+            clone_dir.mkdir(parents=True, exist_ok=True)
+            for lockfile_name in self.clone_lockfiles_by_dir.get(clone_dir, ()):
+                (clone_dir / lockfile_name).write_text("", encoding="utf-8")
         if command_tuple[:3] == ("gh", "pr", "create"):
             output = "https://github.com/owner/repo/pull/123"
         return CommandResult(
@@ -259,9 +269,78 @@ def build_context(tmp_path: Path) -> RunContext:
     )
 
 
+def _prepare_clones_for_lockfiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    codex_lockfiles: tuple[str, ...],
+    claude_lockfiles: tuple[str, ...],
+) -> tuple[RunContext, _RecordingRunner]:
+    context = build_context(tmp_path)
+    context = context.with_implementation(context.implementation.with_base_branch(""))
+    context.plan.path.write_text("# My Plan\n", encoding="utf-8")
+    runner = _RecordingRunner(
+        clone_lockfiles_by_dir={
+            context.implementation.codex_dir: codex_lockfiles,
+            context.implementation.claude_dir: claude_lockfiles,
+        },
+    )
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+
+    def remote_default_branch(repo_dir: Path) -> str:
+        assert repo_dir == context.implementation.codex_dir
+        return "trunk"
+
+    def ensure_remote_branch_absent(repo_dir: Path, branch: str) -> None:
+        assert repo_dir == context.implementation.codex_dir
+        assert branch in {
+            context.implementation.codex_branch,
+            context.implementation.claude_branch,
+        }
+
+    def checkout_branch(
+        repo_dir: Path,
+        *,
+        branch: str,
+        base_branch: str,
+        log_prefix: str,
+    ) -> None:
+        assert repo_dir in {
+            context.implementation.codex_dir,
+            context.implementation.claude_dir,
+        }
+        assert branch in {
+            context.implementation.codex_branch,
+            context.implementation.claude_branch,
+        }
+        assert base_branch == "trunk"
+        assert log_prefix in {"codex", "claude"}
+
+    monkeypatch.setattr(orchestrator.git, "remote_default_branch", remote_default_branch)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "ensure_remote_branch_absent",
+        ensure_remote_branch_absent,
+    )
+    monkeypatch.setattr(orchestrator.git, "checkout_branch", checkout_branch)
+
+    updated_context = orchestrator._prepare_implementation_clones(context)  # noqa: SLF001
+    return updated_context, runner
+
+
+def _install_calls(
+    runner: _RecordingRunner,
+) -> list[tuple[tuple[str, ...], Path, str]]:
+    return [
+        command_call
+        for command_call in runner.command_calls
+        if command_call[0][0] in {"pnpm", "uv"}
+    ]
+
+
 def test_run_happy_path_walks_full_phase_sequence(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan_path = tmp_path / "My Plan.md"
     plan_path.write_text("# My Plan\n", encoding="utf-8")
@@ -347,7 +426,7 @@ def test_build_pr_body_includes_dirty_records(tmp_path: Path) -> None:
 
 def test_prepare_implementation_clones_returns_context_without_mutation(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = build_context(tmp_path)
     context = context.with_implementation(context.implementation.with_base_branch(""))
@@ -393,13 +472,91 @@ def test_prepare_implementation_clones_returns_context_without_mutation(
         (context.implementation.codex_dir, "codex/my-plan", "trunk", "codex"),
         (context.implementation.claude_dir, "claude/my-plan", "trunk", "claude"),
     ]
+    assert _install_calls(runner) == []
     assert (context.implementation.codex_dir / "My Plan.md").is_file()
     assert (context.implementation.claude_dir / "My Plan.md").is_file()
 
 
+def test_prepare_implementation_clones_installs_uv_lockfiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, runner = _prepare_clones_for_lockfiles(
+        tmp_path,
+        monkeypatch,
+        codex_lockfiles=("uv.lock",),
+        claude_lockfiles=("uv.lock",),
+    )
+
+    assert _install_calls(runner) == [
+        (("uv", "sync", "--locked"), context.implementation.codex_dir, "codex-uv-sync"),
+        (
+            ("uv", "sync", "--locked"),
+            context.implementation.claude_dir,
+            "claude-uv-sync",
+        ),
+    ]
+
+
+def test_prepare_implementation_clones_installs_pnpm_lockfiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, runner = _prepare_clones_for_lockfiles(
+        tmp_path,
+        monkeypatch,
+        codex_lockfiles=("pnpm-lock.yaml",),
+        claude_lockfiles=("pnpm-lock.yaml",),
+    )
+
+    assert _install_calls(runner) == [
+        (
+            ("pnpm", "install", "--frozen-lockfile"),
+            context.implementation.codex_dir,
+            "codex-pnpm-install",
+        ),
+        (
+            ("pnpm", "install", "--frozen-lockfile"),
+            context.implementation.claude_dir,
+            "claude-pnpm-install",
+        ),
+    ]
+
+
+def test_prepare_implementation_clones_installs_both_lockfiles_in_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, runner = _prepare_clones_for_lockfiles(
+        tmp_path,
+        monkeypatch,
+        codex_lockfiles=("uv.lock", "pnpm-lock.yaml"),
+        claude_lockfiles=("uv.lock", "pnpm-lock.yaml"),
+    )
+
+    assert _install_calls(runner) == [
+        (("uv", "sync", "--locked"), context.implementation.codex_dir, "codex-uv-sync"),
+        (
+            ("pnpm", "install", "--frozen-lockfile"),
+            context.implementation.codex_dir,
+            "codex-pnpm-install",
+        ),
+        (
+            ("uv", "sync", "--locked"),
+            context.implementation.claude_dir,
+            "claude-uv-sync",
+        ),
+        (
+            ("pnpm", "install", "--frozen-lockfile"),
+            context.implementation.claude_dir,
+            "claude-pnpm-install",
+        ),
+    ]
+
+
 def test_poll_acceptance_skips_missing_notes_comparison_file(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = build_context(tmp_path)
     runner = _RecordingRunner()
@@ -438,7 +595,7 @@ def test_commit_if_changes_skips_missing_untracked_paths(tmp_path: Path) -> None
 
 def test_finalize_pr_records_dirty_files_and_still_pushes(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = build_context(tmp_path)
     selected_repo = tmp_path / "codex-my-plan"

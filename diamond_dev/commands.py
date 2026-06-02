@@ -51,6 +51,16 @@ def build_coderabbit_review_command(base_branch: str) -> tuple[str, ...]:
     return ("coderabbit", "review", "--plain", "--base", base_branch)
 
 
+def build_uv_sync_command() -> tuple[str, ...]:
+    """Build a locked uv package install command."""
+    return ("uv", "sync", "--locked")
+
+
+def build_pnpm_install_command() -> tuple[str, ...]:
+    """Build a frozen pnpm package install command."""
+    return ("pnpm", "install", "--frozen-lockfile")
+
+
 def build_gh_pr_create_command(
     *,
     base_branch: str,

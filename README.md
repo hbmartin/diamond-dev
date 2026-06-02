@@ -82,6 +82,12 @@ For a plan named `My Plan.md`, the command uses the slug `my-plan` and creates:
 The implementation clone directories must not already exist. The notes wiki
 clone is reused if present and synchronized with fast-forward-only pulls.
 
+After each implementation clone is prepared on its workflow branch,
+`diamond-dev` checks the clone root for package lockfiles. If `uv.lock` exists,
+it runs `uv sync --locked`; if `pnpm-lock.yaml` exists, it runs
+`pnpm install --frozen-lockfile`. Repositories with both lockfiles run both
+commands in that order. Repositories with neither lockfile skip package install.
+
 ## Acceptance
 
 Gemini must write `comparison.md` in the invocation directory. The command then
@@ -113,6 +119,12 @@ needed:
 - `gemini`
 - `coderabbit`
 - `gh`
+
+The following commands are required only when the cloned target repository has
+matching root lockfiles:
+
+- `uv` for `uv.lock`
+- `pnpm` for `pnpm-lock.yaml`
 
 Before cloning or launching agents, `diamond-dev` runs a fast preflight that
 checks these commands are available on `PATH` and verifies `gh auth status`.

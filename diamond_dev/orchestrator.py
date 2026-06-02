@@ -26,6 +26,8 @@ from diamond_dev.commands import (
     build_codex_command,
     build_gemini_command,
     build_gh_pr_create_command,
+    build_pnpm_install_command,
+    build_uv_sync_command,
     comparison_implementation_prompt,
     gemini_comparison_prompt,
     initial_implementation_prompt,
@@ -301,6 +303,8 @@ class DiamondDevOrchestrator:
             base_branch=implementation.base_branch,
             log_prefix="claude",
         )
+        self._install_packages(implementation.codex_dir, log_prefix="codex")
+        self._install_packages(implementation.claude_dir, log_prefix="claude")
 
         for repo_dir in (
             implementation.codex_dir,
@@ -308,6 +312,28 @@ class DiamondDevOrchestrator:
         ):
             shutil.copy2(context.plan.path, repo_dir / context.plan.file_name)
         return context.with_implementation(implementation)
+
+    def _install_packages(self, repo_dir: Path, *, log_prefix: str) -> None:
+        supported_lockfile_found = False
+        if (repo_dir / "uv.lock").is_file():
+            supported_lockfile_found = True
+            self.runner.run(
+                build_uv_sync_command(),
+                cwd=repo_dir,
+                log_name=f"{log_prefix}-uv-sync",
+            )
+        if (repo_dir / "pnpm-lock.yaml").is_file():
+            supported_lockfile_found = True
+            self.runner.run(
+                build_pnpm_install_command(),
+                cwd=repo_dir,
+                log_name=f"{log_prefix}-pnpm-install",
+            )
+        if not supported_lockfile_found:
+            logger.info(
+                "No supported package lockfile found in {}; skipping install",
+                repo_dir,
+            )
 
     def _run_initial_agents(self, context: RunContext) -> RunContext:
         prompt = initial_implementation_prompt(context.plan.file_name)
@@ -495,7 +521,7 @@ class DiamondDevOrchestrator:
                 output_path=review_file,
             )
         except (CommandFailureError,) as error:
-            logger.warning(
+            logger.opt(exception=error).warning(
                 "CodeRabbit review failed; continuing where possible: {}",
                 error,
             )

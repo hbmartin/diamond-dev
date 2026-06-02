@@ -12,6 +12,8 @@ from diamond_dev.commands import (
     build_codex_command,
     build_gemini_command,
     build_gh_pr_create_command,
+    build_pnpm_install_command,
+    build_uv_sync_command,
     gemini_comparison_prompt,
     initial_implementation_prompt,
 )
@@ -61,6 +63,18 @@ def test_build_coderabbit_review_command_uses_plain_base() -> None:
         "--plain",
         "--base",
         "main",
+    )
+
+
+def test_build_uv_sync_command_is_locked() -> None:
+    assert build_uv_sync_command() == ("uv", "sync", "--locked")
+
+
+def test_build_pnpm_install_command_is_frozen() -> None:
+    assert build_pnpm_install_command() == (
+        "pnpm",
+        "install",
+        "--frozen-lockfile",
     )
 
 
