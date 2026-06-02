@@ -12,6 +12,9 @@ dependencies = [
     "loguru>=0.7.3",
 ]
 
+[project.scripts]
+diamond-dev = "diamond_dev.main:main"
+
 [dependency-groups]
 dev = [
     "lizard>=1.23.0",
@@ -24,7 +27,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.5"]
+requires = ["uv_build>=0.9.5,<0.12"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
@@ -42,10 +45,9 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["ANN204", "D107", "D203", "D213", "EM101", "PLR2004"]
+ignore = ["ANN204", "B013", "D107", "D203", "D213", "EM101", "EM102", "PLR2004", "TC003", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
-"diamond-dev/*.py" = ["N999"]
 "tests/*.py" = ["ANN001", "ANN002", "ANN201", "D100", "D102", "D103", "D400", "D415", "E501", "F401", "FBT003", "INP001", "PLC0415", "PLR0913", "PLR2004", "PT006", "PT009", "PT027", "S101", "SIM115", "TRY003"]
 
 [tool.ruff.format]
