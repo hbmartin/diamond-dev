@@ -1,5 +1,5 @@
-- Always run `uv run ruff check diamond-dev --fix; uv run pyrefly check diamond-dev; uv run ty check diamond-dev` after making changes.
-- Run `uv run lizard -Eduplicate diamond-dev; uv run pytest tests/` after finishing implementation.
+- Always run `uv run ruff check diamond_dev --fix; uv run pyrefly check diamond_dev; uv run ty check diamond_dev` after making changes.
+- Run `uv run lizard -Eduplicate diamond_dev; uv run pytest tests/` after finishing implementation.
 - Any user facing changes (e.g. new CLI flags) should be documented in the `README.md`.
 - Use `uv` not `python` for running scripts.
 - Treat Type Hints as First-Class
