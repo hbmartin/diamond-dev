@@ -1,0 +1,9 @@
+- Always run `uv run ruff check diamond-dev --fix; uv run pyrefly check diamond-dev; uv run ty check diamond-dev` after making changes.
+- Run `uv run lizard -Eduplicate diamond-dev; uv run pytest tests/` after finishing implementation.
+- Any user facing changes (e.g. new CLI flags) should be documented in the `README.md`.
+- Use `uv` not `python` for running scripts.
+- Treat Type Hints as First-Class
+- Prefer Explicitness and Small Functions
+- Use modern Python features e.g. assignment expressions and Structural Pattern Matching where applicable
+- Use a parenthesized tuple of exception classes in the except clause
+- Use loguru for output, never print

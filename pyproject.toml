@@ -1,0 +1,62 @@
+[project]
+name = "diamond-dev"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.14"
+authors = [
+    { name = "Harold Martin", email = "Harold.Martin@gmail.com" },
+]
+dependencies = [
+    "loguru>=0.7.3",
+]
+
+[dependency-groups]
+dev = [
+    "lizard>=1.23.0",
+    "pyrefly>=1.0.0",
+    "pyroma>=5.0.1",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.15",
+    "ty>=0.0.42",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.5"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+wheel-exclude = ["**/.mypy_cache", "**/.DS_Store"]
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [".bzr", ".direnv", ".eggs", ".git", ".git-rewrite", ".hg", ".ipynb_checkpoints", ".mypy_cache", ".nox", ".pants.d", ".pyenv", ".pytest_cache", ".pytype", ".ruff_cache", ".svn", ".tox", ".venv", ".vscode", "__pypackages__", "_build", "buck-out", "build", "dist", "node_modules", "setup.py", "site-packages", "venv"]
+
+# Same as Black.
+line-length = 88
+indent-width = 4
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["ANN204", "D107", "D203", "D213", "EM101", "PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+"diamond-dev/*.py" = ["N999"]
+"tests/*.py" = ["ANN001", "ANN002", "ANN201", "D100", "D102", "D103", "D400", "D415", "E501", "F401", "FBT003", "INP001", "PLC0415", "PLR0913", "PLR2004", "PT006", "PT009", "PT027", "S101", "SIM115", "TRY003"]
+
+[tool.ruff.format]
+# Same as Black.
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.pyrefly]
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
