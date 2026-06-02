@@ -24,6 +24,10 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
         'repository_url = "git@github.com:owner/repo.git"\n'
         'notes_repository_url = "git@github.com:owner/repo.wiki.git"\n'
         'gemini_comparison_prompt_file = "prompts/compare.md"\n'
+        'notify_initial_implementation_url = "https://example.test/initial"\n'
+        'notify_comparison_url = "https://example.test/comparison"\n'
+        'notify_comparison_implementation_url = "https://example.test/followup"\n'
+        'notify_review_input_needed_url = "https://example.test/review"\n'
         'notify_open_pr_url = "https://example.test/open-pr"',
         encoding="utf-8",
     )
@@ -34,6 +38,17 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
     assert config.notes_repository_url == "git@github.com:owner/repo.wiki.git"
     assert config.gemini_prompt_path() == prompt_file
     assert read_gemini_prompt(config) == "Compare these branches."
+    assert config.notifications.initial_implementation_url == (
+        "https://example.test/initial"
+    )
+    assert config.notifications.comparison_url == "https://example.test/comparison"
+    assert config.notifications.comparison_implementation_url == (
+        "https://example.test/followup"
+    )
+    assert config.notifications.review_input_needed_url == (
+        "https://example.test/review"
+    )
+    assert config.notifications.open_pr_url == "https://example.test/open-pr"
     assert config.notify_open_pr_url == "https://example.test/open-pr"
 
 

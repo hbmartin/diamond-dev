@@ -14,7 +14,8 @@ from diamond_dev.main import configure_logging
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from pytest import MonkeyPatch
+
+    import pytest
 
 
 def test_configure_logging_writes_to_text_and_json_files(tmp_path: Path) -> None:
@@ -48,7 +49,7 @@ def test_exception_logging_writes_descriptive_traceback(tmp_path: Path) -> None:
     configure_logging(log_file=log_file, json_log_file=json_log_file)
 
     try:
-        raise RuntimeError("full exception detail")
+        _raise_runtime_error()
     except (RuntimeError,):
         logger.exception("descriptive failure context")
     logger.complete()
@@ -79,7 +80,7 @@ def test_warnings_are_captured_by_loguru(tmp_path: Path) -> None:
 
 def test_main_logs_diamond_dev_errors_with_traceback(
     tmp_path: Path,
-    monkeypatch: MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     log_file = tmp_path / "diamond-dev.log"
     json_log_file = tmp_path / "diamond-dev.jsonl"
@@ -108,3 +109,7 @@ def _read_first_json_payload(json_log_file: Path) -> dict[str, Any]:
     payload = json.loads(first_line)
     assert isinstance(payload, dict)
     return payload
+
+
+def _raise_runtime_error() -> None:
+    raise RuntimeError("full exception detail")
