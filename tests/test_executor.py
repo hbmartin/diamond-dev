@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from io import StringIO
 from pathlib import Path
 from typing import NoReturn
@@ -18,13 +19,13 @@ def test_run_to_file_streams_without_returning_full_output(tmp_path: Path) -> No
     output_path = tmp_path / "output.txt"
 
     result = runner.run_to_file(
-        ("sh", "-c", "printf 'hello\\n'"),
+        (sys.executable, "-c", "import sys; sys.stdout.write('hello\\n')"),
         cwd=tmp_path,
         log_name="write-output",
         output_path=output_path,
     )
 
-    assert output_path.read_text(encoding="utf-8") == "hello\n"
+    assert output_path.read_text(encoding="utf-8").replace("\r\n", "\n") == "hello\n"
     assert result.output == ""
 
 
@@ -80,7 +81,7 @@ def test_started_process_wait_closes_streams(tmp_path: Path) -> None:
     runner = CommandRunner(tmp_path / "logs")
 
     managed_process = runner.start(
-        ("sh", "-c", "printf 'hello\\n'"),
+        (sys.executable, "-c", "import sys; sys.stdout.write('hello\\n')"),
         cwd=tmp_path,
         log_name="async-output",
     )

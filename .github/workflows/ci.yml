@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   lint-type-test:
@@ -30,6 +32,39 @@ jobs:
 
       - name: Run Ruff
         run: uv run ruff check diamond_dev
+
+      - name: Run Pylint
+        id: pylint
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          uv run pylint diamond_dev > pylint-report.txt 2>&1
+          exit_code=$?
+          cat pylint-report.txt
+          echo "exit_code=${exit_code}" >> "${GITHUB_OUTPUT}"
+          exit "${exit_code}"
+
+      - name: Comment on PR when Pylint fails
+        if: github.event_name == 'pull_request' && steps.pylint.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## Pylint failed"
+            echo
+            echo "Pylint failed in ${GITHUB_WORKFLOW} for ${GITHUB_SHA}."
+            echo
+            echo '```text'
+            tail -c 60000 pylint-report.txt
+            echo '```'
+          } > pylint-pr-comment.md
+          gh pr comment "${PR_NUMBER}" --body-file pylint-pr-comment.md
+
+      - name: Fail if Pylint failed
+        if: steps.pylint.outputs.exit_code != '0'
+        run: exit "${{ steps.pylint.outputs.exit_code }}"
 
       - name: Run Pyrefly
         run: uv run pyrefly check diamond_dev
