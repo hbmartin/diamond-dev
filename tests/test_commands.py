@@ -12,6 +12,7 @@ from diamond_dev.commands import (
     build_codex_command,
     build_gemini_command,
     build_gh_pr_create_command,
+    build_gh_pr_list_command,
     build_pnpm_install_command,
     build_uv_sync_command,
     gemini_comparison_prompt,
@@ -98,6 +99,22 @@ def test_build_gh_pr_create_command_is_deterministic() -> None:
         "Implement My Plan",
         "--body",
         "body",
+    )
+
+
+def test_build_gh_pr_list_command_checks_all_states() -> None:
+    assert build_gh_pr_list_command("codex/my-plan") == (
+        "gh",
+        "pr",
+        "list",
+        "--head",
+        "codex/my-plan",
+        "--state",
+        "all",
+        "--json",
+        "number,state,url",
+        "--limit",
+        "1",
     )
 
 

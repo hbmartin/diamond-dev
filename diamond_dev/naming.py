@@ -71,12 +71,12 @@ def is_git_remote_url(repository_url: str) -> bool:
     return _has_url_host(parsed_url) and _has_repository_path(parsed_url.path)
 
 
-def notes_directory_name(repository_url: str) -> str:
-    """Return the local notes wiki clone directory name."""
+def wiki_directory_name(repository_url: str) -> str:
+    """Return the local GitHub Gollum wiki clone directory name."""
     return f"{repository_name_from_url(repository_url)}.wiki"
 
 
-def derive_notes_repository_url(repository_url: str) -> str:
+def derive_wiki_repository_url(repository_url: str) -> str:
     """Derive the GitHub Gollum wiki remote for a GitHub repository URL."""
     cleaned_url = repository_url.strip().rstrip("/")
     match = _SCP_GITHUB_PATTERN.match(cleaned_url)

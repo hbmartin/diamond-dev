@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from diamond_dev.errors import DiamondDevError
@@ -11,6 +13,15 @@ if TYPE_CHECKING:
     from diamond_dev.workflow import RunContext, SelectedImplementation
 
 _PR_URL_PATTERN = re.compile(r"https://\S+/pull/\d+")
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingPullRequest:
+    """Existing pull request metadata returned by gh."""
+
+    number: int
+    state: str
+    url: str
 
 
 def parse_pr_url(gh_output: str) -> str:
@@ -30,6 +41,35 @@ def parse_pr_number(gh_output: str) -> str:
     return match.group(1)
 
 
+def parse_existing_pull_request(gh_output: str) -> ExistingPullRequest | None:
+    """Parse the first existing PR from `gh pr list --json` output."""
+    try:
+        payload = json.loads(gh_output)
+    except (json.JSONDecodeError,) as error:
+        raise DiamondDevError(f"Could not parse PR list JSON: {gh_output}") from error
+
+    if not isinstance(payload, list):
+        raise DiamondDevError(f"Expected PR list JSON array: {gh_output}")
+    if not payload:
+        return None
+
+    first_item = payload[0]
+    if not isinstance(first_item, dict):
+        raise DiamondDevError(f"Expected PR list item object: {gh_output}")
+
+    number = first_item.get("number")
+    state = first_item.get("state")
+    url = first_item.get("url")
+    if not isinstance(number, int) or not isinstance(state, str) or not isinstance(
+        url,
+        str,
+    ):
+        raise DiamondDevError(
+            f"PR list item missing number, state, or url: {gh_output}",
+        )
+    return ExistingPullRequest(number=number, state=state, url=url)
+
+
 def build_pr_body(context: RunContext, selected: SelectedImplementation) -> str:
     """Build deterministic pull request body text."""
     body_lines = [
@@ -38,8 +78,8 @@ def build_pr_body(context: RunContext, selected: SelectedImplementation) -> str:
         f"- Accepted implementation: {selected.accepted_agent}",
         f"- Selected branch: {selected.branch}",
         f"- Base branch: {context.implementation.base_branch}",
-        f"- Comparison notes: {context.notes.comparison_file.name}",
-        f"- Review notes: {context.notes.review_file.name}",
+        f"- Comparison wiki page: {context.wiki.comparison_file.name}",
+        f"- Review wiki page: {context.wiki.review_file.name}",
     ]
     if context.dirty_records:
         body_lines.extend(("", "Uncommitted dirty files observed:"))

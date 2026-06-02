@@ -8,9 +8,9 @@ import pytest
 
 from diamond_dev.errors import UrlDerivationError
 from diamond_dev.naming import (
-    derive_notes_repository_url,
+    derive_wiki_repository_url,
     is_git_remote_url,
-    notes_directory_name,
+    wiki_directory_name,
     repository_name_from_url,
     slug_for_plan,
 )
@@ -81,8 +81,8 @@ def test_is_git_remote_url_rejects_malformed_urls(repository_url: str) -> None:
     assert not is_git_remote_url(repository_url)
 
 
-def test_notes_directory_name_uses_repository_name() -> None:
-    assert notes_directory_name("git@github.com:owner/repo.git") == "repo.wiki"
+def test_wiki_directory_name_uses_repository_name() -> None:
+    assert wiki_directory_name("git@github.com:owner/repo.git") == "repo.wiki"
 
 
 @pytest.mark.parametrize(
@@ -99,15 +99,15 @@ def test_notes_directory_name_uses_repository_name() -> None:
         ),
     ],
 )
-def test_derive_notes_repository_url(repository_url: str, expected: str) -> None:
-    assert derive_notes_repository_url(repository_url) == expected
+def test_derive_wiki_repository_url(repository_url: str, expected: str) -> None:
+    assert derive_wiki_repository_url(repository_url) == expected
 
 
-def test_derive_notes_repository_url_rejects_non_github_remote() -> None:
+def test_derive_wiki_repository_url_rejects_non_github_remote() -> None:
     with pytest.raises(UrlDerivationError):
-        derive_notes_repository_url("git@example.com:owner/repo.git")
+        derive_wiki_repository_url("git@example.com:owner/repo.git")
 
 
-def test_derive_notes_repository_url_rejects_extra_github_path() -> None:
+def test_derive_wiki_repository_url_rejects_extra_github_path() -> None:
     with pytest.raises(UrlDerivationError):
-        derive_notes_repository_url("https://github.com/owner/repo/issues")
+        derive_wiki_repository_url("https://github.com/owner/repo/issues")

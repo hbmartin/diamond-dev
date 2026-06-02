@@ -22,7 +22,7 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
     prompt_file.write_text("Compare these branches.", encoding="utf-8")
     (tmp_path / CONFIG_FILE_NAME).write_text(
         'repository_url = "git@github.com:owner/repo.git"\n'
-        'notes_repository_url = "git@github.com:owner/repo.wiki.git"\n'
+        'wiki_repository_url = "git@github.com:owner/repo.wiki.git"\n'
         'gemini_comparison_prompt_file = "prompts/compare.md"\n'
         'notify_initial_implementation_url = "https://example.test/initial"\n'
         'notify_comparison_url = "https://example.test/comparison"\n'
@@ -35,7 +35,7 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
     config = load_config(tmp_path)
 
     assert config.repository_url == "git@github.com:owner/repo.git"
-    assert config.notes_repository_url == "git@github.com:owner/repo.wiki.git"
+    assert config.wiki_repository_url == "git@github.com:owner/repo.wiki.git"
     assert config.gemini_prompt_path() == prompt_file
     assert read_gemini_prompt(config) == "Compare these branches."
     assert config.notifications.initial_implementation_url == (
@@ -49,6 +49,17 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
         "https://example.test/review"
     )
     assert config.notifications.open_pr_url == "https://example.test/open-pr"
+
+
+def test_load_config_rejects_removed_notes_repository_url(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'notes_repository_url = "git@github.com:owner/repo.wiki.git"',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="wiki_repository_url"):
+        load_config(tmp_path)
 
 
 def test_load_config_reads_explicit_relative_config_path(tmp_path: Path) -> None:

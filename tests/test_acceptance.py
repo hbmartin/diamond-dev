@@ -9,6 +9,7 @@ from diamond_dev.acceptance import (
     AgentChoice,
     acceptance_wait_delays,
     append_acceptance_checkbox,
+    ensure_acceptance_checkbox,
     parse_acceptance,
 )
 from diamond_dev.errors import MalformedAcceptanceError
@@ -22,6 +23,18 @@ def test_append_acceptance_checkbox_adds_exact_line() -> None:
 
 def test_parse_acceptance_waiting_state() -> None:
     assert parse_acceptance(ACCEPTANCE_CHECKBOX) is None
+
+
+def test_ensure_acceptance_checkbox_keeps_existing_marker() -> None:
+    markdown = ensure_acceptance_checkbox(f"# Comparison\n{ACCEPTANCE_CHECKBOX}\n")
+
+    assert markdown == f"# Comparison\n{ACCEPTANCE_CHECKBOX}\n"
+
+
+def test_ensure_acceptance_checkbox_appends_missing_marker() -> None:
+    markdown = ensure_acceptance_checkbox("# Comparison")
+
+    assert markdown == f"# Comparison\n{ACCEPTANCE_CHECKBOX}\n"
 
 
 @pytest.mark.parametrize(

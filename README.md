@@ -37,8 +37,8 @@ such as `git@github.com:owner/repo.git`.
 
 Optional keys:
 
-- `notes_repository_url`: Gollum wiki repository URL. If omitted, GitHub remotes
-  are derived as `<repo>.wiki.git`.
+- `wiki_repository_url`: GitHub Gollum wiki repository URL. If omitted, GitHub
+  remotes are derived as `<repo>.wiki.git`.
 - `gemini_comparison_prompt_file`: Prompt file for Gemini branch comparison.
   Relative paths resolve from the config file directory.
 - `notify_initial_implementation_url`
@@ -50,26 +50,28 @@ Optional keys:
 Notification URLs are best-effort GET requests. Failures are logged but do not
 stop the workflow.
 
+The previous `notes_repository_url` key has been removed. Use
+`wiki_repository_url`; configs that still contain the old key fail at startup.
+
 ## Prompts
 
 Built-in prompt sources:
 
-- [Initial implementation prompt](diamond_dev/commands.py#L88-L93): asks Codex
+- [Initial implementation prompt](diamond_dev/commands.py): asks Codex
   and Claude to implement the plan and commit without pushing.
-- [Comparison follow-up prompt](diamond_dev/commands.py#L96-L102): asks the
-  opposite agent to apply requested follow-up changes from the comparison.
-- [Review judgment prompt](diamond_dev/commands.py#L105-L113): asks Codex to
+- [Comparison follow-up prompt](diamond_dev/commands.py): asks the opposite agent
+  to apply requested follow-up changes from the comparison.
+- [Review judgment prompt](diamond_dev/commands.py): asks Codex to
   classify CodeRabbit review findings.
-- [Review fix prompt](diamond_dev/commands.py#L116-L123): asks Codex to
-  implement accepted review fixes.
-- [Gemini comparison prompt wrapper](diamond_dev/commands.py#L126-L141): adds
+- [Review fix prompt](diamond_dev/commands.py): asks Codex to implement accepted
+  review fixes.
+- [Gemini comparison prompt wrapper](diamond_dev/commands.py): adds
   required branch, repository, and output-file context to the Gemini prompt.
-- [Fallback Gemini comparison prompt](diamond_dev/commands.py#L144-L150): used
-  when `gemini_comparison_prompt_file` is unset or empty.
+- [Fallback Gemini comparison prompt](diamond_dev/commands.py): used when
+  `gemini_comparison_prompt_file` is unset or empty.
 
-The optional [Gemini comparison prompt file](diamond_dev/config.py#L85-L96) can
-replace the fallback comparison instructions while keeping the required context
-wrapper.
+The optional Gemini comparison prompt file can replace the fallback comparison
+instructions while keeping the required context wrapper.
 
 ## Generated Repositories
 
@@ -77,10 +79,11 @@ For a plan named `My Plan.md`, the command uses the slug `my-plan` and creates:
 
 - `codex-my-plan` on branch `codex/my-plan`
 - `claude-my-plan` on branch `claude/my-plan`
-- `<repo-name>.wiki` for notes
+- `<repo-name>.wiki` for the GitHub Gollum wiki
 
-The implementation clone directories must not already exist. The notes wiki
-clone is reused if present and synchronized with fast-forward-only pulls.
+The wiki clone is reused if present and synchronized with fast-forward-only
+pulls. Implementation clone directories are created on a fresh run and are
+required on an auto-resume run.
 
 After each implementation clone is prepared on its workflow branch,
 `diamond-dev` checks the clone root for package lockfiles. If `uv.lock` exists,
@@ -88,10 +91,40 @@ it runs `uv sync --locked`; if `pnpm-lock.yaml` exists, it runs
 `pnpm install --frozen-lockfile`. Repositories with both lockfiles run both
 commands in that order. Repositories with neither lockfile skip package install.
 
+## Auto-Resume
+
+`diamond-dev` does not write checkpoint files. Rerunning the same plan
+automatically resumes from existing local implementation clones, workflow branch
+state, wiki artifacts, and PR state.
+
+Auto-resume requires both `codex-<slug>` and `claude-<slug>` to exist as Git
+repositories with the configured `repository_url` as `origin`. If exactly one
+clone is missing, or workflow branches exist on origin while local clones are
+missing, the run fails clearly.
+
+Branch resume rules:
+
+- Remote workflow branches must match the local branch exactly; divergence fails.
+- A zero-commit branch counts as complete only when the matching remote branch
+  exists and matches local.
+- Local commits with no remote branch are pushed instead of rerunning that agent.
+- If only one initial agent branch is incomplete, only that agent is rerun.
+- The default branch may have advanced; `diamond-dev` does not rebase or merge.
+
+Artifact resume rules:
+
+- If the wiki comparison page exists, it overwrites local `comparison.md`.
+- If only local `comparison.md` exists, it is promoted to the wiki with the
+  acceptance checkbox added when missing.
+- If only a local review file exists, it is promoted to the wiki.
+- If local and wiki review files both exist and differ, the run fails.
+- Existing PRs for the selected branch, open or closed, fail before PR creation.
+- Notifications are sent only for phases completed by the current process.
+
 ## Acceptance
 
 Gemini must write `comparison.md` in the invocation directory. The command then
-appends this exact line and pushes the file to the notes wiki as
+appends this exact line and pushes the file to the GitHub Gollum wiki as
 `<slug>-comparison.md`:
 
 ```markdown
@@ -105,8 +138,9 @@ The workflow accepts only one of these edited values:
 - [x] Accept: claude
 ```
 
-Malformed acceptance markers fail immediately. If no valid acceptance is found,
-the command waits 2 minutes, then retries with waits of 3 through 12 minutes.
+Malformed acceptance markers fail immediately. The command checks once
+immediately, then waits 2 minutes, then retries with waits of 3 through 12
+minutes.
 
 ## External CLIs
 

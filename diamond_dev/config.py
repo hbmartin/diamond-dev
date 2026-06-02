@@ -30,7 +30,7 @@ class DiamondDevConfig:
 
     config_path: Path
     repository_url: str
-    notes_repository_url: str | None = None
+    wiki_repository_url: str | None = None
     gemini_comparison_prompt_file: str | None = None
     notifications: NotificationConfig = NotificationConfig()
 
@@ -68,10 +68,20 @@ def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
         "repository_url",
         resolved_config_path,
     )
+    _reject_renamed_key(
+        raw_config,
+        old_key="notes_repository_url",
+        new_key="wiki_repository_url",
+        config_path=resolved_config_path,
+    )
     return DiamondDevConfig(
         config_path=resolved_config_path,
         repository_url=repository_url,
-        notes_repository_url=_optional_string(raw_config, "notes_repository_url"),
+        wiki_repository_url=_optional_git_remote_url(
+            raw_config,
+            "wiki_repository_url",
+            resolved_config_path,
+        ),
         gemini_comparison_prompt_file=_optional_string(
             raw_config,
             "gemini_comparison_prompt_file",
@@ -129,6 +139,32 @@ def _optional_string(raw_config: dict[str, Any], key: str) -> str | None:
         stripped_value = value.strip()
         return stripped_value or None
     raise ConfigError(f"Optional config key `{key}` must be a string when set")
+
+
+def _optional_git_remote_url(
+    raw_config: dict[str, Any],
+    key: str,
+    config_path: Path,
+) -> str | None:
+    value = _optional_string(raw_config, key)
+    if value is None:
+        return None
+    if is_git_remote_url(value):
+        return value
+    raise ConfigError(f"Config {config_path} `{key}` must be a valid Git remote URL")
+
+
+def _reject_renamed_key(
+    raw_config: dict[str, Any],
+    *,
+    old_key: str,
+    new_key: str,
+    config_path: Path,
+) -> None:
+    if old_key in raw_config:
+        raise ConfigError(
+            f"Config {config_path} uses removed key `{old_key}`; use `{new_key}`",
+        )
 
 
 def _load_notifications(raw_config: dict[str, Any]) -> NotificationConfig:

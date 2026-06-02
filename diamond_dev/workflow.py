@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.naming import (
-    derive_notes_repository_url,
-    notes_directory_name,
+    derive_wiki_repository_url,
     slug_for_plan,
+    wiki_directory_name,
 )
 
 if TYPE_CHECKING:
@@ -51,8 +51,8 @@ class PlanContext:
 
 
 @dataclass(frozen=True, slots=True)
-class NotesContext:
-    """Resolved notes repository paths."""
+class WikiContext:
+    """Resolved GitHub Gollum wiki repository paths."""
 
     url: str
     directory: Path
@@ -82,7 +82,7 @@ class RunContext:
     cwd: Path
     config: DiamondDevConfig
     plan: PlanContext
-    notes: NotesContext
+    wiki: WikiContext
     implementation: ImplementationContext
     comparison_file: Path
     dirty_records: tuple[DirtyRecord, ...] = ()
@@ -109,7 +109,7 @@ class RunContext:
 
 @dataclass(frozen=True, slots=True)
 class SelectedImplementation:
-    """The implementation branch selected from comparison notes."""
+    """The implementation branch selected from the wiki comparison."""
 
     accepted_agent: AgentChoice
     opposite_agent: AgentChoice
@@ -136,19 +136,19 @@ def build_run_context(
 ) -> RunContext:
     """Build resolved workflow context from config and a plan path."""
     plan_slug = slug_for_plan(plan_path)
-    notes_url = config.notes_repository_url or derive_notes_repository_url(
+    wiki_url = config.wiki_repository_url or derive_wiki_repository_url(
         config.repository_url,
     )
-    notes_dir = cwd / notes_directory_name(config.repository_url)
+    wiki_dir = cwd / wiki_directory_name(config.repository_url)
     return RunContext(
         cwd=cwd,
         config=config,
         plan=PlanContext(path=plan_path, slug=plan_slug),
-        notes=NotesContext(
-            url=notes_url,
-            directory=notes_dir,
-            comparison_file=notes_dir / f"{plan_slug}-comparison.md",
-            review_file=notes_dir / f"{plan_slug}-review.md",
+        wiki=WikiContext(
+            url=wiki_url,
+            directory=wiki_dir,
+            comparison_file=wiki_dir / f"{plan_slug}-comparison.md",
+            review_file=wiki_dir / f"{plan_slug}-review.md",
         ),
         implementation=ImplementationContext(
             codex_dir=cwd / f"codex-{plan_slug}",

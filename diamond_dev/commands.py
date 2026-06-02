@@ -61,6 +61,23 @@ def build_pnpm_install_command() -> tuple[str, ...]:
     return ("pnpm", "install", "--frozen-lockfile")
 
 
+def build_gh_pr_list_command(head_branch: str) -> tuple[str, ...]:
+    """Build a deterministic GitHub PR lookup command for a workflow branch."""
+    return (
+        "gh",
+        "pr",
+        "list",
+        "--head",
+        head_branch,
+        "--state",
+        "all",
+        "--json",
+        "number,state,url",
+        "--limit",
+        "1",
+    )
+
+
 def build_gh_pr_create_command(
     *,
     base_branch: str,
@@ -107,8 +124,10 @@ def comparison_implementation_prompt(comparison_file_name: str) -> str:
     """Return the prompt for the opposite agent comparison implementation."""
     return (
         f"Read `{comparison_file_name}` and implement the requested comparison "
-        "follow-up changes on the current branch. Commit your changes. Do not push; "
-        "diamond-dev will push committed work."
+        "follow-up changes on the current branch. This prompt may be rerun after "
+        "a crash, so inspect the current branch first and avoid duplicating work "
+        "that is already applied. Commit your changes. Do not push; diamond-dev "
+        "will push committed work."
     )
 
 
@@ -129,7 +148,9 @@ def review_fix_prompt(review_file_name: str) -> str:
         f"Read `{review_file_name}`. Implement every review item judged as "
         "(A) should fix. Do not implement items judged as (B) decline fix. Leave "
         "items judged as (C) requirements ambiguous or input needed unchanged. "
-        "Commit your changes. Do not push; diamond-dev will push committed work."
+        "This prompt may be rerun after a crash, so inspect the current branch "
+        "first and avoid duplicating work that is already applied. Commit your "
+        "changes. Do not push; diamond-dev will push committed work."
     )
 
 

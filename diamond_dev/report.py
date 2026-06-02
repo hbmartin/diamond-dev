@@ -75,20 +75,20 @@ def _context_payload(context: RunContext | None) -> dict[str, object] | None:
         "config_path": str(context.config.config_path),
         "plan_path": str(context.plan.path),
         "repository_url": context.config.repository_url,
-        "notes_repository_url": context.notes.url,
+        "wiki_repository_url": context.wiki.url,
         "branches": {
             "base": context.implementation.base_branch,
             "codex": context.implementation.codex_branch,
             "claude": context.implementation.claude_branch,
         },
         "repositories": {
-            "notes": str(context.notes.directory),
+            "wiki": str(context.wiki.directory),
             "codex": str(context.implementation.codex_dir),
             "claude": str(context.implementation.claude_dir),
         },
         "artifacts": {
-            "comparison": str(context.notes.comparison_file),
-            "review": str(context.notes.review_file),
+            "comparison": str(context.wiki.comparison_file),
+            "review": str(context.wiki.review_file),
             "pr_url": context.pr_url,
         },
         "dirty_records": [
