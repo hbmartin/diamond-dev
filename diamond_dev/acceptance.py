@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Final, Literal
 
 from diamond_dev.errors import MalformedAcceptanceError
@@ -11,6 +12,7 @@ type AgentChoice = Literal["codex", "claude"]
 ACCEPTANCE_CHECKBOX: Final = "- [ ] Accept: (codex/claude)"
 CODEX_ACCEPTED_LINE: Final = "- [x] Accept: codex"
 CLAUDE_ACCEPTED_LINE: Final = "- [x] Accept: claude"
+_ACCEPTANCE_LINE_PATTERN: Final = re.compile(r"^- \[[ xX]\] Accept:")
 
 
 def append_acceptance_checkbox(markdown: str) -> str:
@@ -22,7 +24,9 @@ def append_acceptance_checkbox(markdown: str) -> str:
 def parse_acceptance(markdown: str) -> AgentChoice | None:
     """Parse the comparison acceptance marker."""
     acceptance_lines = [
-        line.strip() for line in markdown.splitlines() if "Accept:" in line
+        stripped_line
+        for line in markdown.splitlines()
+        if _ACCEPTANCE_LINE_PATTERN.match(stripped_line := line.strip())
     ]
     if not acceptance_lines:
         return None

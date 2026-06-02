@@ -23,7 +23,7 @@ from diamond_dev.naming import (
         ("Example 2026!.md", "example-2026"),
     ],
 )
-def test_slug_for_plan(filename, expected) -> None:
+def test_slug_for_plan(filename: str, expected: str) -> None:
     assert slug_for_plan(Path(filename)) == expected
 
 
@@ -40,7 +40,7 @@ def test_slug_for_plan_rejects_symbol_only_stem() -> None:
         ("ssh://git@github.com/owner/repo.git", "repo"),
     ],
 )
-def test_repository_name_from_url(repository_url, expected) -> None:
+def test_repository_name_from_url(repository_url: str, expected: str) -> None:
     assert repository_name_from_url(repository_url) == expected
 
 
@@ -62,10 +62,15 @@ def test_notes_directory_name_uses_repository_name() -> None:
         ),
     ],
 )
-def test_derive_notes_repository_url(repository_url, expected) -> None:
+def test_derive_notes_repository_url(repository_url: str, expected: str) -> None:
     assert derive_notes_repository_url(repository_url) == expected
 
 
 def test_derive_notes_repository_url_rejects_non_github_remote() -> None:
     with pytest.raises(UrlDerivationError):
         derive_notes_repository_url("git@example.com:owner/repo.git")
+
+
+def test_derive_notes_repository_url_rejects_extra_github_path() -> None:
+    with pytest.raises(UrlDerivationError):
+        derive_notes_repository_url("https://github.com/owner/repo/issues")

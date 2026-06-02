@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -20,14 +21,10 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
     prompt_file.parent.mkdir()
     prompt_file.write_text("Compare these branches.", encoding="utf-8")
     (tmp_path / CONFIG_FILE_NAME).write_text(
-        "\n".join(
-            [
-                'repository_url = "git@github.com:owner/repo.git"',
-                'notes_repository_url = "git@github.com:owner/repo.wiki.git"',
-                'gemini_comparison_prompt_file = "prompts/compare.md"',
-                'notify_open_pr_url = "https://example.test/open-pr"',
-            ],
-        ),
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'notes_repository_url = "git@github.com:owner/repo.wiki.git"\n'
+        'gemini_comparison_prompt_file = "prompts/compare.md"\n'
+        'notify_open_pr_url = "https://example.test/open-pr"',
         encoding="utf-8",
     )
 
@@ -42,12 +39,18 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
 
 def test_load_config_rejects_non_string_optional_value(tmp_path: Path) -> None:
     (tmp_path / CONFIG_FILE_NAME).write_text(
-        "\n".join(
-            [
-                'repository_url = "git@github.com:owner/repo.git"',
-                "notify_open_pr_url = 1",
-            ],
-        ),
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "notify_open_pr_url = 1",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError):
+        load_config(tmp_path)
+
+
+def test_load_config_wraps_malformed_toml(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n[',
         encoding="utf-8",
     )
 
@@ -57,14 +60,31 @@ def test_load_config_rejects_non_string_optional_value(tmp_path: Path) -> None:
 
 def test_read_gemini_prompt_requires_existing_file(tmp_path: Path) -> None:
     (tmp_path / CONFIG_FILE_NAME).write_text(
-        "\n".join(
-            [
-                'repository_url = "git@github.com:owner/repo.git"',
-                'gemini_comparison_prompt_file = "missing.md"',
-            ],
-        ),
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'gemini_comparison_prompt_file = "missing.md"',
         encoding="utf-8",
     )
+
+    with pytest.raises(ConfigError):
+        read_gemini_prompt(load_config(tmp_path))
+
+
+def test_read_gemini_prompt_wraps_read_failures(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    prompt_file = tmp_path / "compare.md"
+    prompt_file.write_text("Compare these branches.", encoding="utf-8")
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'gemini_comparison_prompt_file = "compare.md"',
+        encoding="utf-8",
+    )
+
+    def fail_read_text(*_args: object, **_kwargs: object) -> NoReturn:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
 
     with pytest.raises(ConfigError):
         read_gemini_prompt(load_config(tmp_path))

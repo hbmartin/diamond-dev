@@ -122,7 +122,7 @@ class CommandRunner:
                 text=True,
                 bufsize=1,
             )
-        except (OSError,) as error:
+        except (OSError, ValueError) as error:
             log_file.close()
             raise CommandFailureError(
                 command=shlex.join(command_tuple),
@@ -171,11 +171,19 @@ class CommandRunner:
         logger.info("Starting interactive {}: {}", log_name, shlex.join(command_tuple))
         with log_path.open("w", encoding="utf-8") as log_file:
             log_file.write(f"$ {shlex.join(command_tuple)}\n")
-            completed = subprocess.run(  # noqa: S603
-                command_tuple,
-                cwd=cwd,
-                check=False,
-            )
+            try:
+                completed = subprocess.run(  # noqa: S603
+                    command_tuple,
+                    cwd=cwd,
+                    check=False,
+                )
+            except (OSError, ValueError) as error:
+                raise CommandFailureError(
+                    command=shlex.join(command_tuple),
+                    cwd=str(cwd),
+                    returncode=127,
+                    log_path=str(log_path),
+                ) from error
             log_file.write(f"exit_code={completed.returncode}\n")
 
         result = CommandResult(
@@ -200,7 +208,7 @@ class CommandRunner:
     ) -> CommandResult:
         log_path = self._log_path(log_name)
         logger.info("Running {}: {}", log_name, shlex.join(command))
-        captured_output: list[str] = []
+        captured_output: list[str] | None = [] if output_path is None else None
 
         with log_path.open("w", encoding="utf-8") as log_file:
             output_file = (
@@ -215,7 +223,7 @@ class CommandRunner:
                     text=True,
                     bufsize=1,
                 )
-            except (OSError,) as error:
+            except (OSError, ValueError) as error:
                 if output_file is not None:
                     output_file.close()
                 raise CommandFailureError(
@@ -237,7 +245,8 @@ class CommandRunner:
 
             try:
                 for line in process.stdout:
-                    captured_output.append(line)
+                    if captured_output is not None:
+                        captured_output.append(line)
                     log_file.write(line)
                     log_file.flush()
                     if output_file is not None:
@@ -256,7 +265,7 @@ class CommandRunner:
             cwd=cwd,
             returncode=returncode,
             log_path=log_path,
-            output="".join(captured_output),
+            output="".join(captured_output) if captured_output is not None else "",
         )
         if check and returncode != 0:
             raise _command_failure(result)

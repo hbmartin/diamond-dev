@@ -48,8 +48,13 @@ def load_config(cwd: Path) -> DiamondDevConfig:
     if not config_path.is_file():
         raise ConfigError(f"Missing required config file: {config_path}")
 
-    with config_path.open("rb") as config_file:
-        raw_config = tomllib.load(config_file)
+    try:
+        with config_path.open("rb") as config_file:
+            raw_config = tomllib.load(config_file)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise ConfigError(
+            f"Could not read config file {config_path}: {error}",
+        ) from error
 
     repository_url = _required_string(raw_config, "repository_url", config_path)
     return DiamondDevConfig(
@@ -84,7 +89,12 @@ def read_gemini_prompt(config: DiamondDevConfig) -> str | None:
         return None
     if not prompt_path.is_file():
         raise ConfigError(f"Gemini comparison prompt file not found: {prompt_path}")
-    return prompt_path.read_text(encoding="utf-8")
+    try:
+        return prompt_path.read_text(encoding="utf-8")
+    except (OSError,) as error:
+        raise ConfigError(
+            f"Could not read Gemini comparison prompt file {prompt_path}: {error}",
+        ) from error
 
 
 def _required_string(raw_config: dict[str, Any], key: str, config_path: Path) -> str:
