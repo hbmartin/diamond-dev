@@ -10,9 +10,9 @@ from diamond_dev.errors import UrlDerivationError
 from diamond_dev.naming import (
     derive_wiki_repository_url,
     is_git_remote_url,
-    wiki_directory_name,
     repository_name_from_url,
     slug_for_plan,
+    wiki_directory_name,
 )
 
 

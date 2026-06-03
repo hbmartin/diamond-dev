@@ -101,7 +101,7 @@ class _RecordingRunner:
         *,
         cwd: Path,
         log_name: str,
-    ):
+    ) -> _CompletedProcess:
         command_tuple = tuple(command)
         self.commands.append(command_tuple)
         return _CompletedProcess(
@@ -133,7 +133,7 @@ class _ScriptedRunner(CommandRunner):
         self.commands: list[tuple[str, ...]] = []
         self.interactive_commands: list[tuple[str, ...]] = []
 
-    def run(
+    def run(  # noqa: C901
         self,
         command: Sequence[str],
         *,
@@ -294,7 +294,6 @@ def build_context(tmp_path: Path) -> RunContext:
             claude_branch="claude/my-plan",
             base_branch="main",
         ),
-        comparison_file=tmp_path / "comparison.md",
     )
 
 
@@ -785,6 +784,38 @@ def test_prepare_wiki_with_plan_fails_on_plan_drift(tmp_path: Path) -> None:
         orchestrator._prepare_wiki_with_plan(context)  # noqa: SLF001
 
 
+def test_prepare_wiki_with_plan_accepts_line_ending_differences(
+    tmp_path: Path,
+) -> None:
+    context = build_context(tmp_path)
+    context.plan.path.write_text("# Source Plan\n", encoding="utf-8")
+    context.wiki.directory.mkdir()
+    (context.wiki.directory / ".git").mkdir()
+    (context.wiki.directory / context.plan.file_name).write_text(
+        "# Source Plan\r\n",
+        encoding="utf-8",
+    )
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    orchestrator._prepare_wiki_with_plan(context)  # noqa: SLF001
+
+
+def test_ensure_agent_plan_copy_accepts_line_ending_differences(
+    tmp_path: Path,
+) -> None:
+    context = build_context(tmp_path)
+    context.plan.path.write_text("# Source Plan\n", encoding="utf-8")
+    repo_dir = context.implementation.codex_dir
+    repo_dir.mkdir()
+    (repo_dir / context.plan.file_name).write_text(
+        "# Source Plan\r\n",
+        encoding="utf-8",
+    )
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    orchestrator._ensure_agent_plan_copy(context, repo_dir)  # noqa: SLF001
+
+
 def test_run_review_phases_promotes_local_review(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -843,6 +874,21 @@ def test_run_review_phases_fails_on_local_wiki_review_diff(
 
     with pytest.raises(DiamondDevError, match="differs from wiki review"):
         orchestrator._run_review_phases(context, selected)  # noqa: SLF001
+
+
+def test_restore_or_validate_review_file_accepts_line_ending_differences(
+    tmp_path: Path,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    context.wiki.review_file.write_text("Review\n", encoding="utf-8")
+    review_file = selected_repo / context.plan.review_file_name
+    review_file.write_text("Review\r\n", encoding="utf-8")
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    orchestrator._restore_or_validate_review_file(context, review_file)  # noqa: SLF001
 
 
 def test_finalize_pr_fails_when_existing_pr_found(

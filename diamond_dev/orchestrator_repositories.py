@@ -10,10 +10,11 @@ from loguru import logger
 
 from diamond_dev.commands import build_pnpm_install_command, build_uv_sync_command
 from diamond_dev.errors import DiamondDevError
-from diamond_dev.executor import CommandRunner
-from diamond_dev.git_ops import GitOperations
+from diamond_dev.markdown import read_normalized_markdown
 
 if TYPE_CHECKING:
+    from diamond_dev.executor import CommandRunner
+    from diamond_dev.git_ops import GitOperations
     from diamond_dev.workflow import RunContext
 
 
@@ -26,9 +27,9 @@ class RepositoryPreparationMixin:
     def _prepare_wiki_with_plan(self, context: RunContext) -> None:
         self._ensure_wiki_repo(context)
         wiki_plan = context.wiki.directory / context.plan.file_name
-        source_plan_markdown = context.plan.path.read_text(encoding="utf-8")
+        source_plan_markdown = read_normalized_markdown(context.plan.path)
         if wiki_plan.is_file():
-            wiki_plan_markdown = wiki_plan.read_text(encoding="utf-8")
+            wiki_plan_markdown = read_normalized_markdown(wiki_plan)
             if wiki_plan_markdown != source_plan_markdown:
                 raise DiamondDevError(
                     f"Plan drift detected for {context.plan.file_name}; "

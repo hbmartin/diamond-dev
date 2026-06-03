@@ -1,5 +1,7 @@
 """Diamond Dev workflow orchestration."""
 
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import shutil
@@ -28,8 +30,6 @@ from diamond_dev.commands import (
     build_gemini_command,
     build_gh_pr_create_command,
     build_gh_pr_list_command,
-    build_pnpm_install_command,
-    build_uv_sync_command,
     comparison_implementation_prompt,
     gemini_comparison_prompt,
     initial_implementation_prompt,
@@ -45,9 +45,18 @@ from diamond_dev.executor import (
     ManagedProcess,
 )
 from diamond_dev.git_ops import GitOperations
+from diamond_dev.markdown import read_normalized_markdown
 from diamond_dev.notify import notify_url
+from diamond_dev.orchestrator_repositories import RepositoryPreparationMixin
 from diamond_dev.preflight import PreflightSummary, run_preflight
-from diamond_dev.report import PhaseTiming, RunReport, RunStatus, write_run_report
+from diamond_dev.report import (
+    PhaseTiming,
+    RunReport,
+    RunReportTiming,
+    RunReportWorkflow,
+    RunStatus,
+    write_run_report,
+)
 
 if TYPE_CHECKING:
     from diamond_dev.workflow import RunContext, SelectedImplementation
@@ -65,7 +74,7 @@ class AgentBranch:
     log_prefix: str
 
 
-class DiamondDevOrchestrator:
+class DiamondDevOrchestrator(RepositoryPreparationMixin):
     """Coordinate the full Diamond Dev multi-agent workflow."""
 
     def __init__(
@@ -85,7 +94,7 @@ class DiamondDevOrchestrator:
         self.report_path = report_path or _default_report_path(self.runner, self.cwd)
         self.sleep = sleep
 
-    def run(self, plan_path: Path) -> int:
+    def run(self, plan_path: Path) -> int:  # pylint: disable=too-many-locals
         """Run the Diamond Dev workflow for a markdown plan."""
         started_at = datetime.now(UTC)
         started_monotonic = time.perf_counter()
@@ -191,13 +200,17 @@ class DiamondDevOrchestrator:
                 RunReport(
                     path=self.report_path,
                     status=status,
-                    started_at=started_at,
-                    finished_at=datetime.now(UTC),
-                    duration_seconds=time.perf_counter() - started_monotonic,
-                    phase_timings=phase_timings,
-                    context=context,
-                    selected=selected,
-                    preflight_summary=preflight_summary,
+                    timing=RunReportTiming(
+                        started_at=started_at,
+                        finished_at=datetime.now(UTC),
+                        duration_seconds=time.perf_counter() - started_monotonic,
+                        phase_timings=phase_timings,
+                    ),
+                    workflow=RunReportWorkflow(
+                        context=context,
+                        selected=selected,
+                        preflight_summary=preflight_summary,
+                    ),
                     command_logs=_command_log_records(self.runner),
                     error=error,
                 ),
@@ -230,214 +243,10 @@ class DiamondDevOrchestrator:
                 report_error,
             )
 
-    def _prepare_wiki_with_plan(self, context: RunContext) -> None:
-        self._ensure_wiki_repo(context)
-        wiki_plan = context.wiki.directory / context.plan.file_name
-        source_plan_markdown = context.plan.path.read_text(encoding="utf-8")
-        if wiki_plan.is_file():
-            wiki_plan_markdown = wiki_plan.read_text(encoding="utf-8")
-            if wiki_plan_markdown != source_plan_markdown:
-                raise DiamondDevError(
-                    f"Plan drift detected for {context.plan.file_name}; "
-                    "the wiki copy differs from the source plan",
-                )
-            logger.info("Wiki plan already matches source plan")
-            return
-
-        shutil.copy2(context.plan.path, wiki_plan)
-        self.git.commit_if_changes(
-            context.wiki.directory,
-            message=f"Add {context.plan.file_name} plan",
-            log_prefix="wiki-plan",
-            paths=(context.plan.file_name,),
-        )
-        self.git.run(context.wiki.directory, "push", log_name="wiki-plan-push")
-
-    def _ensure_wiki_repo(self, context: RunContext) -> None:
-        if context.wiki.directory.exists():
-            if not self.git.is_git_repo(
-                context.wiki.directory,
-                log_name="wiki-is-git-repo",
-            ):
-                raise DiamondDevError(
-                    f"Existing wiki path is not a Git repo: {context.wiki.directory}",
-                )
-            self.git.sync_wiki(context.wiki.directory)
-            return
-
-        self.runner.run(
-            ("git", "clone", context.wiki.url, str(context.wiki.directory)),
-            cwd=context.cwd,
-            log_name="wiki-clone",
-        )
-
-    def _prepare_implementation_clones(self, context: RunContext) -> RunContext:
-        implementation = context.implementation
-        clone_dirs = (implementation.codex_dir, implementation.claude_dir)
-        existing_clone_count = sum(clone_dir.exists() for clone_dir in clone_dirs)
-        if existing_clone_count not in {0, len(clone_dirs)}:
-            raise DiamondDevError(
-                "Cannot auto-resume with missing implementation clone; "
-                f"expected both {implementation.codex_dir} and "
-                f"{implementation.claude_dir}",
-            )
-        if existing_clone_count == len(clone_dirs):
-            return self._resume_implementation_clones(context)
-
-        self._ensure_remote_workflow_branches_absent(context)
-        return self._clone_implementation_repositories(context)
-
-    def _ensure_remote_workflow_branches_absent(self, context: RunContext) -> None:
-        for branch in (
-            context.implementation.codex_branch,
-            context.implementation.claude_branch,
-        ):
-            if self.git.remote_url_branch_exists(
-                context.cwd,
-                remote_url=context.config.repository_url,
-                branch=branch,
-                log_name=f"remote-branch-exists-{branch}",
-            ):
-                raise DiamondDevError(
-                    "Workflow branch exists on origin but local implementation "
-                    f"clones are missing: {branch}",
-                )
-
-    def _clone_implementation_repositories(self, context: RunContext) -> RunContext:
-        implementation = context.implementation
-        self.runner.run(
-            (
-                "git",
-                "clone",
-                context.config.repository_url,
-                str(implementation.codex_dir),
-            ),
-            cwd=context.cwd,
-            log_name="codex-clone",
-        )
-        implementation = implementation.with_base_branch(
-            self.git.remote_default_branch(implementation.codex_dir),
-        )
-        self.runner.run(
-            (
-                "git",
-                "clone",
-                context.config.repository_url,
-                str(implementation.claude_dir),
-            ),
-            cwd=context.cwd,
-            log_name="claude-clone",
-        )
-        self.git.checkout_branch(
-            implementation.codex_dir,
-            branch=implementation.codex_branch,
-            base_branch=implementation.base_branch,
-            log_prefix="codex",
-        )
-        self.git.checkout_branch(
-            implementation.claude_dir,
-            branch=implementation.claude_branch,
-            base_branch=implementation.base_branch,
-            log_prefix="claude",
-        )
-        self._install_packages(implementation.codex_dir, log_prefix="codex")
-        self._install_packages(implementation.claude_dir, log_prefix="claude")
-
-        for repo_dir in (
-            implementation.codex_dir,
-            implementation.claude_dir,
-        ):
-            shutil.copy2(context.plan.path, repo_dir / context.plan.file_name)
-        return context.with_implementation(implementation)
-
-    def _resume_implementation_clones(self, context: RunContext) -> RunContext:
-        implementation = context.implementation
-        for agent_branch in _agent_branches(context):
-            self._validate_resume_clone(context, agent_branch)
-        implementation = implementation.with_base_branch(
-            self.git.remote_default_branch(implementation.codex_dir),
-        )
-        self._install_packages(implementation.codex_dir, log_prefix="codex")
-        self._install_packages(implementation.claude_dir, log_prefix="claude")
-        return context.with_implementation(implementation)
-
-    def _validate_resume_clone(
+    def _run_initial_agents(  # pylint: disable=too-many-locals
         self,
         context: RunContext,
-        agent_branch: AgentBranch,
-    ) -> None:
-        if not self.git.is_git_repo(
-            agent_branch.repo_dir,
-            log_name=f"{agent_branch.log_prefix}-is-git-repo",
-        ):
-            raise DiamondDevError(
-                "Existing implementation path is not a Git repo: "
-                f"{agent_branch.repo_dir}",
-            )
-        origin_url = self.git.origin_url(
-            agent_branch.repo_dir,
-            log_name=f"{agent_branch.log_prefix}-origin-url",
-        )
-        if origin_url != context.config.repository_url:
-            raise DiamondDevError(
-                f"Implementation clone origin mismatch for {agent_branch.repo_dir}: "
-                f"expected {context.config.repository_url}, found {origin_url}",
-            )
-        self.git.fetch(
-            agent_branch.repo_dir,
-            log_name=f"{agent_branch.log_prefix}-fetch",
-        )
-        if not self.git.local_branch_exists(
-            agent_branch.repo_dir,
-            agent_branch.branch,
-            log_name=f"{agent_branch.log_prefix}-local-branch-exists",
-        ):
-            raise DiamondDevError(
-                "Cannot auto-resume because local workflow branch is missing: "
-                f"{agent_branch.branch}",
-            )
-        self.git.checkout_existing_branch(
-            agent_branch.repo_dir,
-            branch=agent_branch.branch,
-            log_prefix=agent_branch.log_prefix,
-        )
-        if self.git.remote_branch_exists(
-            agent_branch.repo_dir,
-            agent_branch.branch,
-            log_name=f"{agent_branch.log_prefix}-remote-branch-exists",
-        ) and not self.git.branches_match_remote(
-            agent_branch.repo_dir,
-            agent_branch.branch,
-            log_prefix=agent_branch.log_prefix,
-        ):
-            raise DiamondDevError(
-                "Cannot auto-resume divergent workflow branch: "
-                f"{agent_branch.branch}",
-            )
-
-    def _install_packages(self, repo_dir: Path, *, log_prefix: str) -> None:
-        supported_lockfile_found = False
-        if (repo_dir / "uv.lock").is_file():
-            supported_lockfile_found = True
-            self.runner.run(
-                build_uv_sync_command(),
-                cwd=repo_dir,
-                log_name=f"{log_prefix}-uv-sync",
-            )
-        if (repo_dir / "pnpm-lock.yaml").is_file():
-            supported_lockfile_found = True
-            self.runner.run(
-                build_pnpm_install_command(),
-                cwd=repo_dir,
-                log_name=f"{log_prefix}-pnpm-install",
-            )
-        if not supported_lockfile_found:
-            logger.info(
-                "No supported package lockfile found in {}; skipping install",
-                repo_dir,
-            )
-
-    def _run_initial_agents(self, context: RunContext) -> RunContext:
+    ) -> RunContext:
         missing_agents: list[AgentBranch] = []
         completed_in_current_process = False
         active_context = context
@@ -546,9 +355,9 @@ class DiamondDevOrchestrator:
 
     def _ensure_agent_plan_copy(self, context: RunContext, repo_dir: Path) -> None:
         repo_plan = repo_dir / context.plan.file_name
-        source_plan_markdown = context.plan.path.read_text(encoding="utf-8")
+        source_plan_markdown = read_normalized_markdown(context.plan.path)
         if repo_plan.is_file():
-            repo_plan_markdown = repo_plan.read_text(encoding="utf-8")
+            repo_plan_markdown = read_normalized_markdown(repo_plan)
             if repo_plan_markdown != source_plan_markdown:
                 raise DiamondDevError(
                     f"Plan drift detected for {repo_plan}; "
@@ -767,9 +576,9 @@ class DiamondDevOrchestrator:
         context: RunContext,
         review_file: Path,
     ) -> None:
-        wiki_review_markdown = context.wiki.review_file.read_text(encoding="utf-8")
+        wiki_review_markdown = read_normalized_markdown(context.wiki.review_file)
         if review_file.is_file():
-            local_review_markdown = review_file.read_text(encoding="utf-8")
+            local_review_markdown = read_normalized_markdown(review_file)
             if local_review_markdown != wiki_review_markdown:
                 raise DiamondDevError(
                     "Local review file differs from wiki review file: "
@@ -905,6 +714,8 @@ class DiamondDevOrchestrator:
                 command = build_codex_command(repo_dir, prompt)
             case "claude":
                 command = build_claude_print_command(prompt)
+            case _:
+                raise ValueError(f"Unknown agent: {agent}")
         return self.runner.run(command, cwd=repo_dir, log_name=log_name)
 
 
@@ -931,6 +742,8 @@ def _initial_agent_command(agent_branch: AgentBranch, prompt: str) -> tuple[str,
             return build_codex_command(agent_branch.repo_dir, prompt)
         case "claude":
             return build_claude_print_command(prompt)
+        case _:
+            raise ValueError(f"Unknown agent: {agent_branch.agent}")
 
 
 def _default_report_path(runner: object, cwd: Path) -> Path:

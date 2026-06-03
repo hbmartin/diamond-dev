@@ -41,5 +41,6 @@ def notify_url(url: str | None, *, label: str, timeout: float = 10.0) -> None:
                 label,
                 response.status,
             )
+    # pylint: disable-next=broad-exception-caught
     except (Exception,) as error:  # noqa: BLE001
         logger.opt(exception=error).warning("Notification {} failed: {}", label, error)

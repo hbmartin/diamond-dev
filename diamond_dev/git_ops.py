@@ -154,7 +154,7 @@ class GitOperations:
             "rev-parse",
             "--verify",
             "--quiet",
-            branch,
+            f"refs/heads/{branch}",
             log_name=log_name,
             check=False,
         )
@@ -214,7 +214,12 @@ class GitOperations:
             f"origin/{base_branch}...{branch}",
             log_name=log_name,
         )
-        counts = result.output.strip().split()
+        lines = result.output.strip().splitlines()
+        if not lines:
+            raise DiamondDevError(
+                f"No output returned for ahead/behind of {branch}",
+            )
+        counts = lines[-1].split()
         if len(counts) != 2:
             raise DiamondDevError(
                 f"Unexpected ahead/behind output for {branch}: {result.output}",
