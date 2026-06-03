@@ -84,9 +84,13 @@ class RunContext:
     plan: PlanContext
     wiki: WikiContext
     implementation: ImplementationContext
-    comparison_file: Path
     dirty_records: tuple[DirtyRecord, ...] = ()
     pr_url: str | None = None
+
+    @property
+    def comparison_file(self) -> Path:
+        """Return the local comparison artifact path."""
+        return self.cwd / "comparison.md"
 
     def with_implementation(
         self,
@@ -156,7 +160,6 @@ def build_run_context(
             codex_branch=f"codex/{plan_slug}",
             claude_branch=f"claude/{plan_slug}",
         ),
-        comparison_file=cwd / "comparison.md",
     )
 
 

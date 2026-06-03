@@ -28,18 +28,32 @@ class PhaseTiming:
 
 
 @dataclass(frozen=True, slots=True)
+class RunReportTiming:
+    """Timing data for a structured run report."""
+
+    started_at: datetime
+    finished_at: datetime
+    duration_seconds: float
+    phase_timings: Sequence[PhaseTiming]
+
+
+@dataclass(frozen=True, slots=True)
+class RunReportWorkflow:
+    """Workflow data for a structured run report."""
+
+    context: RunContext | None
+    selected: SelectedImplementation | None
+    preflight_summary: PreflightSummary | None
+
+
+@dataclass(frozen=True, slots=True)
 class RunReport:
     """Inputs for writing a structured run report."""
 
     path: Path
     status: RunStatus
-    started_at: datetime
-    finished_at: datetime
-    duration_seconds: float
-    phase_timings: Sequence[PhaseTiming]
-    context: RunContext | None
-    selected: SelectedImplementation | None
-    preflight_summary: PreflightSummary | None
+    timing: RunReportTiming
+    workflow: RunReportWorkflow
     command_logs: Sequence[CommandLogRecord]
     error: str | None
 
@@ -49,14 +63,14 @@ def write_run_report(report: RunReport) -> None:
     report.path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "status": report.status,
-        "started_at": report.started_at.isoformat(),
-        "finished_at": report.finished_at.isoformat(),
-        "duration_seconds": round(report.duration_seconds, 3),
+        "started_at": report.timing.started_at.isoformat(),
+        "finished_at": report.timing.finished_at.isoformat(),
+        "duration_seconds": round(report.timing.duration_seconds, 3),
         "error": report.error,
-        "context": _context_payload(report.context),
-        "selected_implementation": _selected_payload(report.selected),
-        "preflight": _preflight_payload(report.preflight_summary),
-        "phase_timings": _phase_timings_payload(report.phase_timings),
+        "context": _context_payload(report.workflow.context),
+        "selected_implementation": _selected_payload(report.workflow.selected),
+        "preflight": _preflight_payload(report.workflow.preflight_summary),
+        "phase_timings": _phase_timings_payload(report.timing.phase_timings),
         "command_logs": _command_logs_payload(report.command_logs),
     }
     report.path.write_text(
