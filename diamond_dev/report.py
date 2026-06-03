@@ -16,7 +16,19 @@ if TYPE_CHECKING:
     from diamond_dev.preflight import PreflightSummary
     from diamond_dev.workflow import RunContext, SelectedImplementation
 
-type RunStatus = Literal["succeeded", "failed"]
+type RunStatus = Literal["succeeded", "succeeded_with_warnings", "failed"]
+type PhaseWarningStatus = Literal["failed", "skipped"]
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseWarning:
+    """Non-fatal phase degradation captured during a run."""
+
+    phase: str
+    status: PhaseWarningStatus
+    message: str
+    error: str | None
+    log_name: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +67,7 @@ class RunReport:
     timing: RunReportTiming
     workflow: RunReportWorkflow
     command_logs: Sequence[CommandLogRecord]
+    phase_warnings: Sequence[PhaseWarning]
     error: str | None
 
 
@@ -71,6 +84,7 @@ def write_run_report(report: RunReport) -> None:
         "selected_implementation": _selected_payload(report.workflow.selected),
         "preflight": _preflight_payload(report.workflow.preflight_summary),
         "phase_timings": _phase_timings_payload(report.timing.phase_timings),
+        "phase_warnings": _phase_warnings_payload(report.phase_warnings),
         "command_logs": _command_logs_payload(report.command_logs),
     }
     report.path.write_text(
@@ -154,6 +168,21 @@ def _phase_timings_payload(
             "duration_seconds": round(phase_timing.duration_seconds, 3),
         }
         for phase_timing in phase_timings
+    ]
+
+
+def _phase_warnings_payload(
+    phase_warnings: Sequence[PhaseWarning],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "phase": phase_warning.phase,
+            "status": phase_warning.status,
+            "message": phase_warning.message,
+            "error": phase_warning.error,
+            "log_name": phase_warning.log_name,
+        }
+        for phase_warning in phase_warnings
     ]
 
 
