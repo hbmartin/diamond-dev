@@ -1,4 +1,4 @@
-"""Acceptance marker helpers for comparison notes."""
+"""Acceptance marker helpers for wiki comparison pages."""
 
 from __future__ import annotations
 
@@ -21,13 +21,18 @@ def append_acceptance_checkbox(markdown: str) -> str:
     return f"{markdown}{separator}{ACCEPTANCE_CHECKBOX}\n"
 
 
+def ensure_acceptance_checkbox(markdown: str) -> str:
+    """Return markdown with exactly one valid acceptance marker."""
+    acceptance_lines = _acceptance_lines(markdown)
+    if acceptance_lines:
+        parse_acceptance(markdown)
+        return markdown
+    return append_acceptance_checkbox(markdown)
+
+
 def parse_acceptance(markdown: str) -> AgentChoice | None:
     """Parse the comparison acceptance marker."""
-    acceptance_lines = [
-        stripped_line
-        for line in markdown.splitlines()
-        if _ACCEPTANCE_LINE_PATTERN.match(stripped_line := line.strip())
-    ]
+    acceptance_lines = _acceptance_lines(markdown)
     if not acceptance_lines:
         return None
     if len(acceptance_lines) > 1:
@@ -49,3 +54,11 @@ def parse_acceptance(markdown: str) -> AgentChoice | None:
 def acceptance_wait_delays() -> tuple[int, ...]:
     """Return acceptance polling waits in seconds."""
     return (120, *(minutes * 60 for minutes in range(3, 13)))
+
+
+def _acceptance_lines(markdown: str) -> list[str]:
+    return [
+        stripped_line
+        for line in markdown.splitlines()
+        if _ACCEPTANCE_LINE_PATTERN.match(stripped_line := line.strip())
+    ]

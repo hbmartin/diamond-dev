@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from http.client import HTTPException
 from typing import NoReturn
 from urllib.error import URLError
 
@@ -26,6 +27,16 @@ def test_notify_url_ignores_malformed_request_url(monkeypatch) -> None:
     def fail_urlopen(url: str, timeout: float) -> NoReturn:
         del url, timeout
         raise ValueError("bad URL")
+
+    monkeypatch.setattr(notify, "urlopen", fail_urlopen)
+
+    notify.notify_url("https://example.test/hook", label="hook")
+
+
+def test_notify_url_ignores_unexpected_http_failure(monkeypatch) -> None:
+    def fail_urlopen(url: str, timeout: float) -> NoReturn:
+        del url, timeout
+        raise HTTPException("bad status")
 
     monkeypatch.setattr(notify, "urlopen", fail_urlopen)
 

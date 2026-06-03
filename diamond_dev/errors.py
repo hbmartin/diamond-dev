@@ -12,7 +12,7 @@ class ConfigError(DiamondDevError):
 
 
 class UrlDerivationError(DiamondDevError):
-    """Raised when a notes wiki URL cannot be derived."""
+    """Raised when a GitHub wiki URL cannot be derived."""
 
 
 class MalformedAcceptanceError(DiamondDevError):

@@ -41,5 +41,5 @@ def notify_url(url: str | None, *, label: str, timeout: float = 10.0) -> None:
                 label,
                 response.status,
             )
-    except (OSError, ValueError) as error:
+    except (Exception,) as error:  # noqa: BLE001
         logger.opt(exception=error).warning("Notification {} failed: {}", label, error)

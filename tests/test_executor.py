@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import FrozenInstanceError
 from io import StringIO
 from pathlib import Path
 from typing import NoReturn
@@ -11,7 +12,19 @@ import pytest
 
 from diamond_dev import executor
 from diamond_dev.errors import CommandFailureError
-from diamond_dev.executor import CommandRunner
+from diamond_dev.executor import CommandRunner, ProcessMetadata
+
+
+def test_process_metadata_is_frozen(tmp_path: Path) -> None:
+    metadata = ProcessMetadata(
+        command=("git", "status"),
+        cwd=tmp_path,
+        label="status",
+        log_path=tmp_path / "status.log",
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        metadata.label = "other"
 
 
 def test_run_to_file_streams_without_returning_full_output(tmp_path: Path) -> None:
@@ -55,7 +68,7 @@ def test_run_to_file_closes_output_file_on_launch_failure(
     output_writer = StringIO()
     original_open = Path.open
 
-    def tracking_open(self: Path, *args: object, **kwargs: object):
+    def tracking_open(self: Path, *args: object, **kwargs: object) -> object:
         if self == output_path:
             return output_writer
         return original_open(self, *args, **kwargs)
