@@ -71,9 +71,9 @@ def is_git_remote_url(repository_url: str) -> bool:
     return _has_url_host(parsed_url) and _has_repository_path(parsed_url.path)
 
 
-def wiki_directory_name(repository_url: str) -> str:
+def wiki_directory_name(wiki_repository_url: str) -> str:
     """Return the local GitHub Gollum wiki clone directory name."""
-    return f"{repository_name_from_url(repository_url)}.wiki"
+    return repository_name_from_url(wiki_repository_url)
 
 
 def derive_wiki_repository_url(repository_url: str) -> str:

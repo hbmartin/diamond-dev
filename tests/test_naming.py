@@ -81,8 +81,8 @@ def test_is_git_remote_url_rejects_malformed_urls(repository_url: str) -> None:
     assert not is_git_remote_url(repository_url)
 
 
-def test_wiki_directory_name_uses_repository_name() -> None:
-    assert wiki_directory_name("git@github.com:owner/repo.git") == "repo.wiki"
+def test_wiki_directory_name_uses_wiki_repository_name() -> None:
+    assert wiki_directory_name("git@github.com:owner/repo.wiki.git") == "repo.wiki"
 
 
 @pytest.mark.parametrize(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,9 +14,20 @@ from diamond_dev.errors import DiamondDevError
 from diamond_dev.markdown import read_normalized_markdown
 
 if TYPE_CHECKING:
+    from diamond_dev.acceptance import AgentChoice
     from diamond_dev.executor import CommandRunner
     from diamond_dev.git_ops import GitOperations
     from diamond_dev.workflow import RunContext
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeAgentBranch:
+    """Resolved repository and branch details for resuming an agent."""
+
+    agent: AgentChoice
+    repo_dir: Path
+    branch: str
+    log_prefix: str
 
 
 class RepositoryPreparationMixin:
@@ -158,9 +170,11 @@ class RepositoryPreparationMixin:
     def _validate_resume_clone(
         self,
         context: RunContext,
-        agent_branch: tuple[Path, str, str],
+        agent_branch: ResumeAgentBranch,
     ) -> None:
-        repo_dir, branch, log_prefix = agent_branch
+        repo_dir = agent_branch.repo_dir
+        branch = agent_branch.branch
+        log_prefix = agent_branch.log_prefix
         if not self.git.is_git_repo(repo_dir, log_name=f"{log_prefix}-is-git-repo"):
             raise DiamondDevError(
                 f"Existing implementation path is not a Git repo: {repo_dir}",
@@ -223,16 +237,18 @@ class RepositoryPreparationMixin:
             )
 
 
-def _resume_agent_branches(context: RunContext) -> tuple[tuple[Path, str, str], ...]:
+def _resume_agent_branches(context: RunContext) -> tuple[ResumeAgentBranch, ...]:
     return (
-        (
-            context.implementation.codex_dir,
-            context.implementation.codex_branch,
-            "codex",
+        ResumeAgentBranch(
+            agent="codex",
+            repo_dir=context.implementation.codex_dir,
+            branch=context.implementation.codex_branch,
+            log_prefix="codex",
         ),
-        (
-            context.implementation.claude_dir,
-            context.implementation.claude_branch,
-            "claude",
+        ResumeAgentBranch(
+            agent="claude",
+            repo_dir=context.implementation.claude_dir,
+            branch=context.implementation.claude_branch,
+            log_prefix="claude",
         ),
     )

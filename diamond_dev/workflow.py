@@ -143,7 +143,7 @@ def build_run_context(
     wiki_url = config.wiki_repository_url or derive_wiki_repository_url(
         config.repository_url,
     )
-    wiki_dir = cwd / wiki_directory_name(config.repository_url)
+    wiki_dir = cwd / wiki_directory_name(wiki_url)
     return RunContext(
         cwd=cwd,
         config=config,
