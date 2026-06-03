@@ -29,6 +29,7 @@ from diamond_dev.commands import (
     build_codex_command,
     build_gemini_command,
     build_gh_pr_create_command,
+    build_gh_pr_edit_body_command,
     build_gh_pr_list_command,
     comparison_implementation_prompt,
     gemini_comparison_prompt,
@@ -36,7 +37,7 @@ from diamond_dev.commands import (
     review_fix_prompt,
     review_judgment_prompt,
 )
-from diamond_dev.config import load_config, read_gemini_prompt
+from diamond_dev.config import load_config, read_gemini_prompt, read_prompt_file
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.executor import (
     CommandLogRecord,
@@ -51,6 +52,7 @@ from diamond_dev.orchestrator_repositories import RepositoryPreparationMixin
 from diamond_dev.preflight import PreflightSummary, run_preflight
 from diamond_dev.report import (
     PhaseTiming,
+    PhaseWarning,
     RunReport,
     RunReportTiming,
     RunReportWorkflow,
@@ -102,6 +104,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         context: RunContext | None = None
         selected: SelectedImplementation | None = None
         preflight_summary: PreflightSummary | None = None
+        phase_warnings: list[PhaseWarning] = []
         status: RunStatus = "failed"
         error: str | None = None
 
@@ -172,6 +175,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 lambda: self._run_opposite_agent(
                     active_context,
                     selected_implementation,
+                    phase_warnings,
                 ),
             )
             context = active_context
@@ -181,15 +185,20 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 lambda: self._run_review_phases(
                     active_context,
                     selected_implementation,
+                    phase_warnings,
                 ),
             )
             active_context = self._timed_phase(
                 phase_timings,
                 "finalize pull request",
-                lambda: self._finalize_pr(active_context, selected_implementation),
+                lambda: self._finalize_pr(
+                    active_context,
+                    selected_implementation,
+                    phase_warnings,
+                ),
             )
             context = active_context
-            status = "succeeded"
+            status = "succeeded_with_warnings" if phase_warnings else "succeeded"
         except (Exception,) as run_error:
             error = str(run_error)
             raise
@@ -212,6 +221,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                         preflight_summary=preflight_summary,
                     ),
                     command_logs=_command_log_records(self.runner),
+                    phase_warnings=phase_warnings,
                     error=error,
                 ),
             )
@@ -267,7 +277,15 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 )
             return active_context
 
-        prompt = initial_implementation_prompt(context.plan.file_name)
+        configured_prompt = read_prompt_file(
+            context.config,
+            context.config.prompts.initial_implementation_file,
+            label="Initial implementation prompt",
+        )
+        prompt = initial_implementation_prompt(
+            context.plan.file_name,
+            configured_prompt,
+        )
         processes: list[tuple[AgentBranch, ManagedProcess]] = []
         for agent_branch in missing_agents:
             self._ensure_agent_plan_copy(context, agent_branch.repo_dir)
@@ -275,7 +293,11 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 (
                     agent_branch,
                     self.runner.start(
-                        _initial_agent_command(agent_branch, prompt),
+                        _initial_agent_command(
+                            agent_branch,
+                            prompt,
+                            model=_agent_model(context, agent_branch.agent),
+                        ),
                         cwd=agent_branch.repo_dir,
                         log_name=f"{agent_branch.log_prefix}-initial-agent",
                     ),
@@ -393,7 +415,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             ),
         )
         self.runner.run(
-            build_gemini_command(prompt),
+            build_gemini_command(prompt, model=context.config.agents.gemini.model),
             cwd=context.cwd,
             log_name="gemini-comparison",
         )
@@ -461,6 +483,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         self,
         context: RunContext,
         selected: SelectedImplementation,
+        phase_warnings: list[PhaseWarning],
     ) -> RunContext:
         self.git.sync_wiki(context.wiki.directory)
         if context.wiki.review_file.is_file():
@@ -483,18 +506,39 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         shutil.copy2(context.wiki.comparison_file, comparison_file)
         self.git.run(selected.repo_dir, "fetch", log_name="selected-fetch")
 
-        prompt = comparison_implementation_prompt(context.plan.comparison_file_name)
+        configured_prompt = read_prompt_file(
+            context.config,
+            context.config.prompts.comparison_implementation_file,
+            label="Comparison implementation prompt",
+        )
+        prompt = comparison_implementation_prompt(
+            context.plan.comparison_file_name,
+            configured_prompt,
+        )
+        log_name = f"{selected.opposite_agent}-comparison-agent"
         try:
             self._run_agent(
                 agent=selected.opposite_agent,
                 repo_dir=selected.repo_dir,
                 prompt=prompt,
-                log_name=f"{selected.opposite_agent}-comparison-agent",
+                log_name=log_name,
+                model=_agent_model(context, selected.opposite_agent),
             )
         except (CommandFailureError,) as error:
             logger.opt(exception=error).warning(
                 "Opposite agent failed; continuing where possible: {}",
                 error,
+            )
+            phase_warnings.append(
+                PhaseWarning(
+                    phase="opposite agent comparison implementation",
+                    status="failed",
+                    message=(
+                        "Opposite agent failed while applying comparison follow-up."
+                    ),
+                    error=str(error),
+                    log_name=log_name,
+                ),
             )
 
         context = self.git.push_agent_branch(
@@ -526,24 +570,26 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         self,
         context: RunContext,
         selected: SelectedImplementation,
+        phase_warnings: list[PhaseWarning],
     ) -> None:
         self.git.sync_wiki(context.wiki.directory)
         review_file = selected.repo_dir / context.plan.review_file_name
         if context.wiki.review_file.is_file():
             self._restore_or_validate_review_file(context, review_file)
-            self._run_review_fixes(context, selected)
+            self._run_review_fixes(context, selected, phase_warnings)
             return
 
         if review_file.is_file():
             self._promote_review_file(context, review_file)
-            self._run_review_fixes(context, selected)
+            self._run_review_fixes(context, selected, phase_warnings)
             return
 
+        coderabbit_log_name = "coderabbit-review"
         try:
             self.runner.run_to_file(
                 build_coderabbit_review_command(context.implementation.base_branch),
                 cwd=selected.repo_dir,
-                log_name="coderabbit-review",
+                log_name=coderabbit_log_name,
                 output_path=review_file,
             )
         except (CommandFailureError,) as error:
@@ -551,25 +597,71 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 "CodeRabbit review failed; continuing where possible: {}",
                 error,
             )
+            phase_warnings.extend(
+                (
+                    PhaseWarning(
+                        phase="CodeRabbit review",
+                        status="failed",
+                        message=(
+                            "CodeRabbit review failed; no review file was produced."
+                        ),
+                        error=str(error),
+                        log_name=coderabbit_log_name,
+                    ),
+                    PhaseWarning(
+                        phase="Codex review judgment",
+                        status="skipped",
+                        message="Skipped because CodeRabbit review failed.",
+                        error=None,
+                        log_name=None,
+                    ),
+                    PhaseWarning(
+                        phase="Codex review fixes",
+                        status="skipped",
+                        message="Skipped because CodeRabbit review failed.",
+                        error=None,
+                        log_name=None,
+                    ),
+                ),
+            )
             return
 
+        configured_judgment_prompt = read_prompt_file(
+            context.config,
+            context.config.prompts.review_judgment_file,
+            label="Review judgment prompt",
+        )
+        judgment_log_name = "codex-review-judgment"
         try:
             self.runner.run(
                 build_codex_command(
                     selected.repo_dir,
-                    review_judgment_prompt(context.plan.review_file_name),
+                    review_judgment_prompt(
+                        context.plan.review_file_name,
+                        configured_judgment_prompt,
+                    ),
+                    model=context.config.agents.codex.model,
                 ),
                 cwd=selected.repo_dir,
-                log_name="codex-review-judgment",
+                log_name=judgment_log_name,
             )
         except (CommandFailureError,) as error:
             logger.opt(exception=error).warning(
                 "Codex review judgment failed; continuing: {}",
                 error,
             )
+            phase_warnings.append(
+                PhaseWarning(
+                    phase="Codex review judgment",
+                    status="failed",
+                    message="Codex failed while judging CodeRabbit review findings.",
+                    error=str(error),
+                    log_name=judgment_log_name,
+                ),
+            )
 
         self._promote_review_file(context, review_file)
-        self._run_review_fixes(context, selected)
+        self._run_review_fixes(context, selected, phase_warnings)
 
     def _restore_or_validate_review_file(
         self,
@@ -608,26 +700,44 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         self,
         context: RunContext,
         selected: SelectedImplementation,
+        phase_warnings: list[PhaseWarning],
     ) -> None:
+        configured_prompt = read_prompt_file(
+            context.config,
+            context.config.prompts.review_fix_file,
+            label="Review fix prompt",
+        )
+        log_name = "codex-review-fixes"
         try:
             self.runner.run(
                 build_codex_command(
                     selected.repo_dir,
-                    review_fix_prompt(context.plan.review_file_name),
+                    review_fix_prompt(context.plan.review_file_name, configured_prompt),
+                    model=context.config.agents.codex.model,
                 ),
                 cwd=selected.repo_dir,
-                log_name="codex-review-fixes",
+                log_name=log_name,
             )
         except (CommandFailureError,) as error:
             logger.opt(exception=error).warning(
                 "Codex review fixes failed; continuing: {}",
                 error,
             )
+            phase_warnings.append(
+                PhaseWarning(
+                    phase="Codex review fixes",
+                    status="failed",
+                    message="Codex failed while applying accepted review fixes.",
+                    error=str(error),
+                    log_name=log_name,
+                ),
+            )
 
     def _finalize_pr(
         self,
         context: RunContext,
         selected: SelectedImplementation,
+        phase_warnings: list[PhaseWarning],
     ) -> RunContext:
         self._ensure_no_existing_pr(selected)
         for artifact_name in (
@@ -660,7 +770,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         )
 
         pr_title = f"Implement {context.plan.path.stem}"
-        pr_body = pr.build_pr_body(context, selected)
+        pr_body = pr.build_pr_body(context, selected, warnings=phase_warnings)
         pr_result = self.runner.run(
             build_gh_pr_create_command(
                 base_branch=context.implementation.base_branch,
@@ -674,19 +784,41 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         pr_url = pr.parse_pr_url(pr_result.output)
         pr_number = pr.parse_pr_number(pr_result.output)
         notify_url(context.config.notifications.open_pr_url, label="open pr")
+        context = context.with_pr_url(pr_url)
 
+        final_review_log_name = "claude-final-review"
         try:
             self.runner.run_interactive(
-                build_claude_interactive_review_command(pr_number),
+                build_claude_interactive_review_command(
+                    pr_number,
+                    model=context.config.agents.claude.model,
+                ),
                 cwd=selected.repo_dir,
-                log_name="claude-final-review",
+                log_name=final_review_log_name,
             )
         except (CommandFailureError,) as error:
             logger.opt(exception=error).warning(
                 "Final interactive Claude review failed: {}",
                 error,
             )
-        return context.with_pr_url(pr_url)
+            phase_warnings.append(
+                PhaseWarning(
+                    phase="final interactive Claude review",
+                    status="failed",
+                    message="Final interactive Claude review failed after PR creation.",
+                    error=str(error),
+                    log_name=final_review_log_name,
+                ),
+            )
+            self.runner.run(
+                build_gh_pr_edit_body_command(
+                    pr_url=pr_url,
+                    body=pr.build_pr_body(context, selected, warnings=phase_warnings),
+                ),
+                cwd=selected.repo_dir,
+                log_name="gh-pr-edit-final-review-warning",
+            )
+        return context
 
     def _ensure_no_existing_pr(self, selected: SelectedImplementation) -> None:
         result = self.runner.run(
@@ -708,12 +840,13 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         repo_dir: Path,
         prompt: str,
         log_name: str,
+        model: str | None = None,
     ) -> CommandResult:
         match agent:
             case "codex":
-                command = build_codex_command(repo_dir, prompt)
+                command = build_codex_command(repo_dir, prompt, model=model)
             case "claude":
-                command = build_claude_print_command(prompt)
+                command = build_claude_print_command(prompt, model=model)
             case _:
                 raise ValueError(f"Unknown agent: {agent}")
         return self.runner.run(command, cwd=repo_dir, log_name=log_name)
@@ -736,14 +869,29 @@ def _agent_branches(context: RunContext) -> tuple[AgentBranch, AgentBranch]:
     )
 
 
-def _initial_agent_command(agent_branch: AgentBranch, prompt: str) -> tuple[str, ...]:
+def _initial_agent_command(
+    agent_branch: AgentBranch,
+    prompt: str,
+    *,
+    model: str | None,
+) -> tuple[str, ...]:
     match agent_branch.agent:
         case "codex":
-            return build_codex_command(agent_branch.repo_dir, prompt)
+            return build_codex_command(agent_branch.repo_dir, prompt, model=model)
         case "claude":
-            return build_claude_print_command(prompt)
+            return build_claude_print_command(prompt, model=model)
         case _:
             raise ValueError(f"Unknown agent: {agent_branch.agent}")
+
+
+def _agent_model(context: RunContext, agent: AgentChoice) -> str | None:
+    match agent:
+        case "codex":
+            return context.config.agents.codex.model
+        case "claude":
+            return context.config.agents.claude.model
+        case _:
+            raise ValueError(f"Unknown agent: {agent}")
 
 
 def _default_report_path(runner: object, cwd: Path) -> Path:

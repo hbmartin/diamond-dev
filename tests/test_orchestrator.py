@@ -10,7 +10,7 @@ import pytest
 
 from diamond_dev.acceptance import acceptance_wait_delays
 from diamond_dev.config import DiamondDevConfig
-from diamond_dev.errors import DiamondDevError
+from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.executor import (
     CommandLogRecord,
     CommandResult,
@@ -20,6 +20,7 @@ from diamond_dev.executor import (
 from diamond_dev.git_ops import BranchAheadBehind
 from diamond_dev.orchestrator import DiamondDevOrchestrator
 from diamond_dev.pr import build_pr_body
+from diamond_dev.report import PhaseWarning
 from diamond_dev.workflow import (
     DirtyRecord,
     ImplementationContext,
@@ -75,6 +76,18 @@ class _RecordingRunner:
             log_path=cwd / f"{log_name}.log",
             output=output,
         )
+
+    def run_to_file(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        output_path: Path,
+        check: bool = True,
+    ) -> CommandResult:
+        output_path.write_text("", encoding="utf-8")
+        return self.run(command, cwd=cwd, log_name=log_name, check=check)
 
     def run_interactive(
         self,
@@ -269,6 +282,62 @@ class _ScriptedRunner(CommandRunner):
             )
 
 
+class _CodeRabbitFailureRunner(_ScriptedRunner):
+    """Scripted runner that fails the CodeRabbit review phase."""
+
+    def run_to_file(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        output_path: Path,
+        check: bool = True,
+    ) -> CommandResult:
+        assert isinstance(check, bool)
+        assert output_path.name.endswith("-review.md")
+        command_tuple = tuple(command)
+        self.commands.append(command_tuple)
+        log_path = self.log_dir / f"{re_slug(log_name)}.log"
+        log_path.write_text("CodeRabbit crashed\n", encoding="utf-8")
+        self.command_logs.append(
+            CommandLogRecord(
+                label=log_name,
+                command=command_tuple,
+                cwd=cwd,
+                log_path=log_path,
+            ),
+        )
+        raise CommandFailureError(
+            command=" ".join(command_tuple),
+            cwd=str(cwd),
+            returncode=1,
+            log_path=str(log_path),
+        )
+
+
+class _FinalReviewFailureRunner(_RecordingRunner):
+    """Recording runner that fails the final interactive review."""
+
+    def run_interactive(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        assert isinstance(check, bool)
+        command_tuple = tuple(command)
+        self.interactive_commands.append(command_tuple)
+        raise CommandFailureError(
+            command=" ".join(command_tuple),
+            cwd=str(cwd),
+            returncode=1,
+            log_path=str(cwd / f"{log_name}.log"),
+        )
+
+
 def build_context(tmp_path: Path) -> RunContext:
     config = DiamondDevConfig(
         config_path=tmp_path / ".diamond-dev.toml",
@@ -419,6 +488,7 @@ def test_run_happy_path_walks_full_phase_sequence(
 
     report = json.loads((tmp_path / "logs" / "run-report.json").read_text())
     assert report["status"] == "succeeded"
+    assert report["phase_warnings"] == []
     assert report["context"]["artifacts"]["pr_url"] == (
         "https://github.com/owner/repo/pull/123"
     )
@@ -437,6 +507,53 @@ def test_run_happy_path_walks_full_phase_sequence(
         command_log["label"] == "gh-pr-create"
         for command_log in report["command_logs"]
     )
+
+
+def test_run_reports_warning_status_when_coderabbit_review_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = tmp_path / "My Plan.md"
+    plan_path.write_text("# My Plan\n", encoding="utf-8")
+    (tmp_path / ".diamond-dev.toml").write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'wiki_repository_url = "git@github.com:owner/repo.wiki.git"\n',
+        encoding="utf-8",
+    )
+    runner = _CodeRabbitFailureRunner(tmp_path / "logs")
+    monkeypatch.setattr(
+        "diamond_dev.preflight.shutil.which",
+        lambda cli_name: f"/usr/bin/{cli_name}",
+    )
+    monkeypatch.setattr("diamond_dev.orchestrator.acceptance_wait_delays", lambda: (0,))
+    orchestrator = DiamondDevOrchestrator(
+        cwd=tmp_path,
+        runner=runner,
+        sleep=lambda _seconds: None,
+    )
+
+    exit_code = orchestrator.run(plan_path)
+
+    assert exit_code == 0
+    report = json.loads((tmp_path / "logs" / "run-report.json").read_text())
+    assert report["status"] == "succeeded_with_warnings"
+    assert [
+        (warning["phase"], warning["status"])
+        for warning in report["phase_warnings"]
+    ] == [
+        ("CodeRabbit review", "failed"),
+        ("Codex review judgment", "skipped"),
+        ("Codex review fixes", "skipped"),
+    ]
+    pr_create_command = next(
+        command
+        for command in runner.commands
+        if command[:3] == ("gh", "pr", "create")
+    )
+    pr_body = pr_create_command[pr_create_command.index("--body") + 1]
+    assert "Workflow warnings:" in pr_body
+    assert "CodeRabbit review (failed)" in pr_body
+    assert "Codex review fixes (skipped)" in pr_body
 
 
 def test_build_pr_body_includes_dirty_records(tmp_path: Path) -> None:
@@ -459,6 +576,29 @@ def test_build_pr_body_includes_dirty_records(tmp_path: Path) -> None:
     assert "Accepted implementation: codex" in body
     assert "Selected branch: codex/my-plan" in body
     assert "src/app.py, README.md" in body
+
+
+def test_build_pr_body_includes_phase_warnings(tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=tmp_path / "codex-my-plan",
+        branch="codex/my-plan",
+    )
+    warning = PhaseWarning(
+        phase="CodeRabbit review",
+        status="failed",
+        message="CodeRabbit review failed; no review file was produced.",
+        error="exit 1",
+        log_name="coderabbit-review",
+    )
+
+    body = build_pr_body(context, selected, warnings=(warning,))
+
+    assert "Workflow warnings:" in body
+    assert "CodeRabbit review (failed)" in body
+    assert "coderabbit-review" in body
 
 
 def test_prepare_implementation_clones_returns_context_without_mutation(
@@ -857,12 +997,12 @@ def test_run_review_phases_promotes_local_review(
     monkeypatch.setattr(
         orchestrator,
         "_run_review_fixes",
-        lambda _context, selected_implementation: fix_calls.append(
+        lambda _context, selected_implementation, _warnings: fix_calls.append(
             selected_implementation.repo_dir,
         ),
     )
 
-    orchestrator._run_review_phases(context, selected)  # noqa: SLF001
+    orchestrator._run_review_phases(context, selected, [])  # noqa: SLF001
 
     assert context.wiki.review_file.read_text(encoding="utf-8") == "Review\n"
     assert fix_calls == [selected_repo]
@@ -891,7 +1031,7 @@ def test_run_review_phases_fails_on_local_wiki_review_diff(
     monkeypatch.setattr(orchestrator.git, "sync_wiki", lambda _wiki_dir: None)
 
     with pytest.raises(DiamondDevError, match="differs from wiki review"):
-        orchestrator._run_review_phases(context, selected)  # noqa: SLF001
+        orchestrator._run_review_phases(context, selected, [])  # noqa: SLF001
 
 
 def test_restore_or_validate_review_file_accepts_line_ending_differences(
@@ -953,7 +1093,41 @@ def test_finalize_pr_fails_when_existing_pr_found(
     monkeypatch.setattr(runner, "run", run_existing_pr)
 
     with pytest.raises(DiamondDevError, match="Pull request already exists"):
-        orchestrator._finalize_pr(context, selected)  # noqa: SLF001
+        orchestrator._finalize_pr(context, selected, [])  # noqa: SLF001
+
+
+def test_finalize_pr_edits_body_when_final_review_fails(tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=selected_repo,
+        branch=context.implementation.codex_branch,
+    )
+    runner = _FinalReviewFailureRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    phase_warnings: list[PhaseWarning] = []
+
+    updated_context = orchestrator._finalize_pr(  # noqa: SLF001
+        context,
+        selected,
+        phase_warnings,
+    )
+
+    assert updated_context.pr_url == "https://github.com/owner/repo/pull/123"
+    assert [(warning.phase, warning.status) for warning in phase_warnings] == [
+        ("final interactive Claude review", "failed"),
+    ]
+    pr_edit_command = next(
+        command
+        for command in runner.commands
+        if command[:3] == ("gh", "pr", "edit")
+    )
+    pr_body = pr_edit_command[pr_edit_command.index("--body") + 1]
+    assert "Workflow warnings:" in pr_body
+    assert "final interactive Claude review (failed)" in pr_body
 
 
 def test_poll_acceptance_skips_missing_wiki_comparison_file(
@@ -1032,7 +1206,7 @@ def test_finalize_pr_records_dirty_files_and_still_pushes(
     monkeypatch.setattr(orchestrator.git, "commit_if_changes", no_commit)
     monkeypatch.setattr(orchestrator.git, "dirty_files", dirty_files)
 
-    updated_context = orchestrator._finalize_pr(context, selected)  # noqa: SLF001
+    updated_context = orchestrator._finalize_pr(context, selected, [])  # noqa: SLF001
 
     assert not context.dirty_records
     assert updated_context.dirty_records[0].files == ("src/dirty.py",)

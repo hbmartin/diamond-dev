@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from diamond_dev.errors import DiamondDevError
 
 if TYPE_CHECKING:
+    from diamond_dev.report import PhaseWarning
     from diamond_dev.workflow import RunContext, SelectedImplementation
 
 _PR_URL_PATTERN = re.compile(r"https://\S+/pull/\d+")
@@ -70,7 +72,11 @@ def parse_existing_pull_request(gh_output: str) -> ExistingPullRequest | None:
     return ExistingPullRequest(number=number, state=state, url=url)
 
 
-def build_pr_body(context: RunContext, selected: SelectedImplementation) -> str:
+def build_pr_body(
+    context: RunContext,
+    selected: SelectedImplementation,
+    warnings: Sequence[PhaseWarning] = (),
+) -> str:
     """Build deterministic pull request body text."""
     body_lines = [
         "Automated diamond-dev implementation.",
@@ -89,4 +95,23 @@ def build_pr_body(context: RunContext, selected: SelectedImplementation) -> str:
                 for record in context.dirty_records
             ),
         )
+    if warnings:
+        body_lines.extend(("", "Workflow warnings:"))
+        body_lines.extend(_warning_lines(warnings))
     return "\n".join(body_lines)
+
+
+def _warning_lines(warnings: Sequence[PhaseWarning]) -> list[str]:
+    return [
+        _warning_line(warning)
+        for warning in warnings
+    ]
+
+
+def _warning_line(warning: PhaseWarning) -> str:
+    details = [warning.message]
+    if warning.error:
+        details.append(f"error: {warning.error}")
+    if warning.log_name:
+        details.append(f"log: {warning.log_name}")
+    return f"- {warning.phase} ({warning.status}): {'; '.join(details)}"

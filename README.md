@@ -35,21 +35,52 @@ repository_url = "git@github.com:owner/repo.git"
 `git://host/owner/repo.git`, `file:///path/to/repo.git`, or an SCP-like form
 such as `git@github.com:owner/repo.git`.
 
-Optional keys:
+Optional top-level keys:
 
 - `wiki_repository_url`: GitHub Gollum wiki repository URL. If omitted, GitHub
   remotes are derived as `<repo>.wiki.git`. The local wiki clone directory is
   named from the effective wiki repository URL.
-- `gemini_comparison_prompt_file`: Prompt file for Gemini branch comparison.
-  Relative paths resolve from the config file directory.
-- `notify_initial_implementation_url`
-- `notify_comparison_url`
-- `notify_comparison_implementation_url`
-- `notify_review_input_needed_url`
-- `notify_open_pr_url`
+
+Optional tables:
+
+```toml
+[notifications]
+initial_implementation_url = "https://example.test/initial"
+comparison_url = "https://example.test/comparison"
+comparison_implementation_url = "https://example.test/followup"
+review_input_needed_url = "https://example.test/review"
+open_pr_url = "https://example.test/open-pr"
+
+[prompts]
+initial_implementation_file = "prompts/initial.md"
+gemini_comparison_file = "prompts/compare.md"
+comparison_implementation_file = "prompts/followup.md"
+review_judgment_file = "prompts/review-judgment.md"
+review_fix_file = "prompts/review-fixes.md"
+
+[agents.codex]
+model = "gpt-5"
+
+[agents.claude]
+model = "opus"
+
+[agents.gemini]
+model = "gemini-3"
+```
+
+Prompt file paths resolve from the config file directory. Prompt overrides
+replace the built-in task instructions while keeping Diamond Dev's required
+workflow context, such as artifact filenames and commit/no-push requirements.
 
 Notification URLs are best-effort GET requests. Failures are logged but do not
 stop the workflow.
+
+Legacy top-level notification keys are still accepted:
+`notify_initial_implementation_url`, `notify_comparison_url`,
+`notify_comparison_implementation_url`, `notify_review_input_needed_url`, and
+`notify_open_pr_url`. The legacy `gemini_comparison_prompt_file` key is also
+accepted as an alias for `[prompts].gemini_comparison_file`. A config fails if
+both the legacy key and the table key set the same value.
 
 The previous `notes_repository_url` key has been removed. Use
 `wiki_repository_url`; configs that still contain the old key fail at startup.
@@ -69,10 +100,10 @@ Built-in prompt sources:
 - [Gemini comparison prompt wrapper](diamond_dev/commands.py): adds
   required branch, repository, and output-file context to the Gemini prompt.
 - [Fallback Gemini comparison prompt](diamond_dev/commands.py): used when
-  `gemini_comparison_prompt_file` is unset or empty.
+  `[prompts].gemini_comparison_file` is unset or empty.
 
-The optional Gemini comparison prompt file can replace the fallback comparison
-instructions while keeping the required context wrapper.
+Each optional prompt file can replace its matching fallback instructions while
+keeping the required context wrapper.
 
 ## Generated Repositories
 
@@ -176,7 +207,9 @@ Logs are written to stderr, `logs/diamond-dev.log`, and
 
 Each run also writes `logs/run-report.json`, a structured summary containing the
 run status, chosen agent, branches, PR URL, dirty-file records, per-phase
-timings, preflight details, and per-step command log paths.
+timings, non-fatal phase warnings, preflight details, and per-step command log
+paths. Runs that finish after skipped or failed best-effort phases report
+`succeeded_with_warnings` and include those warnings in the PR body.
 
 Configure logging with environment variables:
 
