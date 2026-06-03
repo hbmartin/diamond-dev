@@ -14,7 +14,7 @@ from diamond_dev.git_ops import GitOperations
 
 def test_remote_default_branch_rejects_empty_symbolic_ref_output(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = CommandRunner(tmp_path / "logs")
     git = GitOperations(runner)
@@ -43,7 +43,7 @@ def test_remote_default_branch_rejects_empty_symbolic_ref_output(
 
 def test_local_branch_exists_checks_only_local_heads(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = CommandRunner(tmp_path / "logs")
     git = GitOperations(runner)
@@ -79,7 +79,7 @@ def test_local_branch_exists_checks_only_local_heads(
 
 def test_branch_ahead_behind_parses_counts_from_last_output_line(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = CommandRunner(tmp_path / "logs")
     git = GitOperations(runner)
@@ -115,7 +115,7 @@ def test_branch_ahead_behind_parses_counts_from_last_output_line(
 
 def test_branch_ahead_behind_rejects_empty_output(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = CommandRunner(tmp_path / "logs")
     git = GitOperations(runner)

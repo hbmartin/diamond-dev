@@ -791,13 +791,25 @@ def test_prepare_wiki_with_plan_accepts_line_ending_differences(
     context.plan.path.write_text("# Source Plan\n", encoding="utf-8")
     context.wiki.directory.mkdir()
     (context.wiki.directory / ".git").mkdir()
-    (context.wiki.directory / context.plan.file_name).write_text(
+    wiki_plan = context.wiki.directory / context.plan.file_name
+    wiki_plan.write_text(
         "# Source Plan\r\n",
         encoding="utf-8",
     )
-    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    source_plan_bytes = context.plan.path.read_bytes()
+    wiki_plan_bytes = wiki_plan.read_bytes()
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
 
     orchestrator._prepare_wiki_with_plan(context)  # noqa: SLF001
+
+    assert context.plan.path.read_bytes() == source_plan_bytes
+    assert wiki_plan.read_bytes() == wiki_plan_bytes
+    assert [
+        log_name
+        for _command, _cwd, log_name in runner.command_calls
+        if log_name.startswith("wiki-plan")
+    ] == []
 
 
 def test_ensure_agent_plan_copy_accepts_line_ending_differences(
@@ -807,13 +819,19 @@ def test_ensure_agent_plan_copy_accepts_line_ending_differences(
     context.plan.path.write_text("# Source Plan\n", encoding="utf-8")
     repo_dir = context.implementation.codex_dir
     repo_dir.mkdir()
-    (repo_dir / context.plan.file_name).write_text(
+    agent_plan = repo_dir / context.plan.file_name
+    agent_plan.write_text(
         "# Source Plan\r\n",
         encoding="utf-8",
     )
+    source_plan_bytes = context.plan.path.read_bytes()
+    agent_plan_bytes = agent_plan.read_bytes()
     orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
 
     orchestrator._ensure_agent_plan_copy(context, repo_dir)  # noqa: SLF001
+
+    assert context.plan.path.read_bytes() == source_plan_bytes
+    assert agent_plan.read_bytes() == agent_plan_bytes
 
 
 def test_run_review_phases_promotes_local_review(
@@ -886,9 +904,14 @@ def test_restore_or_validate_review_file_accepts_line_ending_differences(
     context.wiki.review_file.write_text("Review\n", encoding="utf-8")
     review_file = selected_repo / context.plan.review_file_name
     review_file.write_text("Review\r\n", encoding="utf-8")
+    wiki_review_bytes = context.wiki.review_file.read_bytes()
+    local_review_bytes = review_file.read_bytes()
     orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
 
     orchestrator._restore_or_validate_review_file(context, review_file)  # noqa: SLF001
+
+    assert context.wiki.review_file.read_bytes() == wiki_review_bytes
+    assert review_file.read_bytes() == local_review_bytes
 
 
 def test_finalize_pr_fails_when_existing_pr_found(

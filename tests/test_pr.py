@@ -24,5 +24,5 @@ def test_parse_existing_pull_request_reads_first_item() -> None:
 
 
 def test_parse_existing_pull_request_rejects_bad_json() -> None:
-    with pytest.raises(DiamondDevError):
+    with pytest.raises(DiamondDevError, match="Could not parse PR list JSON"):
         parse_existing_pull_request("not json")

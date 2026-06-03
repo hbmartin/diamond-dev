@@ -38,7 +38,8 @@ such as `git@github.com:owner/repo.git`.
 Optional keys:
 
 - `wiki_repository_url`: GitHub Gollum wiki repository URL. If omitted, GitHub
-  remotes are derived as `<repo>.wiki.git`.
+  remotes are derived as `<repo>.wiki.git`. The local wiki clone directory is
+  named from the effective wiki repository URL.
 - `gemini_comparison_prompt_file`: Prompt file for Gemini branch comparison.
   Relative paths resolve from the config file directory.
 - `notify_initial_implementation_url`
