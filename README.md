@@ -195,3 +195,8 @@ read/write permissions. Exception logs include extended tracebacks. When
 OpenTelemetry is installed, log records include the active trace ID, span ID,
 sampled flag, and service name; otherwise those fields are present with default
 zero or empty values.
+
+## License
+
+`diamond-dev` is licensed under the Apache License, Version 2.0. See
+[LICENSE](LICENSE) for details.
