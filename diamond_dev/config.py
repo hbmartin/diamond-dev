@@ -257,7 +257,7 @@ class DiamondDevConfig:
 
 def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
     """Load and validate `.diamond-dev.toml` from the invocation directory."""
-    resolved_config_path = _resolve_config_path(cwd, config_path)
+    resolved_config_path = resolve_config_path(cwd, config_path)
     if not resolved_config_path.is_file():
         raise ConfigError(f"Missing required config file: {resolved_config_path}")
 
@@ -337,7 +337,8 @@ def read_prompt_file(
         ) from error
 
 
-def _resolve_config_path(cwd: Path, config_path: Path | None) -> Path:
+def resolve_config_path(cwd: Path, config_path: Path | None) -> Path:
+    """Return the absolute or cwd-relative config path to load."""
     if config_path is None:
         return cwd / CONFIG_FILE_NAME
     if config_path.is_absolute():

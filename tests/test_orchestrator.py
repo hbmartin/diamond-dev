@@ -152,7 +152,7 @@ class _ScriptedRunner(CommandRunner):
         self.commands: list[tuple[str, ...]] = []
         self.interactive_commands: list[tuple[str, ...]] = []
 
-    def run(  # noqa: C901
+    def run(  # noqa: C901, PLR0912
         self,
         command: Sequence[str],
         *,
@@ -1506,7 +1506,7 @@ def test_promote_review_file_renders_and_copies_valid_sidecar(
     ) == _canonical_review_judgments_text(decision="fix")
 
 
-@pytest.mark.parametrize("pr_state", ("OPEN", "CLOSED", "MERGED"))
+@pytest.mark.parametrize("pr_state", [("OPEN",), ("CLOSED",), ("MERGED",)])
 def test_finalize_pr_fails_when_existing_pr_found(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

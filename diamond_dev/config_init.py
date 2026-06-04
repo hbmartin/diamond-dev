@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from diamond_dev.config import CONFIG_FILE_NAME, load_config
+from diamond_dev.config import load_config, resolve_config_path
 from diamond_dev.errors import ConfigError
 from diamond_dev.naming import is_git_remote_url
 
@@ -57,7 +57,7 @@ def run_config_init(
     write_prompt: PromptWriter | None = None,
 ) -> Path | None:
     """Interactively generate and validate a Diamond Dev config file."""
-    target_path = _resolve_config_path(cwd, config_path)
+    target_path = resolve_config_path(cwd, config_path)
     reader = read_line or sys.stdin.readline
     writer = write_prompt or _write_prompt
 
@@ -80,17 +80,9 @@ def run_config_init(
             f"Could not write config file {target_path}: {error}",
         ) from error
 
-    load_config(cwd, target_path)
+    load_config(cwd, config_path)
     logger.info("Wrote Diamond Dev config: {}", target_path)
     return target_path
-
-
-def _resolve_config_path(cwd: Path, config_path: Path | None) -> Path:
-    if config_path is None:
-        return cwd / CONFIG_FILE_NAME
-    if config_path.is_absolute():
-        return config_path
-    return cwd / config_path
 
 
 def _confirm_overwrite(
@@ -231,12 +223,13 @@ def _prompt(
 def _is_notification_url(value: str) -> bool:
     try:
         parsed_url = urlparse(value)
+        hostname = parsed_url.hostname
         _ = parsed_url.port
     except (ValueError,):
         return False
     return (
         parsed_url.scheme.lower() in _NOTIFICATION_SCHEMES
-        and parsed_url.hostname is not None
+        and hostname is not None
     )
 
 
@@ -262,10 +255,12 @@ def _toml_string(value: str) -> str:
 def _toml_escaped_char(character: str) -> str:
     if character in _TOML_ESCAPES:
         return _TOML_ESCAPES[character]
-    if ord(character) < 0x20:
-        return f"\\u{ord(character):04x}"
+    codepoint = ord(character)
+    if codepoint < 0x20 or codepoint == 0x7F:
+        return f"\\u{codepoint:04x}"
     return character
 
 
 def _write_prompt(prompt: str) -> None:
-    logger.opt(raw=True).info(prompt)
+    sys.stdout.write(prompt)
+    sys.stdout.flush()

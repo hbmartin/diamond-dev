@@ -267,6 +267,34 @@ def test_comparison_bundle_reports_all_changed_files_omitted_by_budget(
     assert "Omitted changed files:" in bundle
 
 
+def test_comparison_bundle_uses_utf8_bytes_for_changed_file_budget(
+    tmp_path: Path,
+) -> None:
+    context = _context(
+        tmp_path,
+        comparison=ComparisonConfig(max_file_diff_bytes=13),
+    )
+    runner = _FakeRunner(tmp_path)
+    git = _FakeGit(tmp_path)
+    git.name_status = {
+        "codex-my-plan": "M\tcaf\u00e9.py\n",
+        "claude-my-plan": "",
+    }
+    git.diffs = {
+        ("codex-my-plan", "caf\u00e9.py"): "diff --git a/caf\u00e9.py b/caf\u00e9.py\n",
+    }
+
+    write_comparison_bundle(
+        context=context,
+        runner=runner,  # type: ignore[arg-type]
+        git=git,  # type: ignore[arg-type]
+    )
+
+    bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
+    assert "- All changed files omitted due to byte budget." in bundle
+    assert "- M: caf\u00e9.py" in bundle
+
+
 def _context(
     tmp_path: Path,
     *,

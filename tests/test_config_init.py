@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -79,8 +81,39 @@ def test_run_config_init_writes_wiki_and_notification_urls(tmp_path: Path) -> No
     assert config.notifications.open_pr_url == "https://example.test/open-pr"
 
 
+def test_run_config_init_validates_relative_config_path_from_relative_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "project"
+    config_dir = project_dir / "configs"
+    config_dir.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    result = run_config_init(
+        Path("project"),
+        Path("configs/diamond.toml"),
+        read_line=_answers(
+            "git@github.com:owner/repo.git\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+        ),
+        write_prompt=lambda _prompt: None,
+    )
+
+    assert result == Path("project/configs/diamond.toml")
+    assert load_config(
+        project_dir,
+        Path("configs/diamond.toml"),
+    ).repository_url == "git@github.com:owner/repo.git"
+
+
 def test_run_config_init_escapes_toml_strings(tmp_path: Path) -> None:
-    notification_url = 'https://example.test/hook?name="diamond"&path=C:\\tmp'
+    notification_url = 'https://example.test/hook?name="diamond"&path=C:\\tmp&del=\x7f'
 
     run_config_init(
         tmp_path,
@@ -99,6 +132,7 @@ def test_run_config_init_escapes_toml_strings(tmp_path: Path) -> None:
     config_text = (tmp_path / CONFIG_FILE_NAME).read_text(encoding="utf-8")
     assert '\\"diamond\\"' in config_text
     assert "C:\\\\tmp" in config_text
+    assert "\\u007f" in config_text
     assert load_config(
         tmp_path,
     ).notifications.initial_implementation_url == notification_url
@@ -148,6 +182,55 @@ def test_run_config_init_reprompts_invalid_notification_url(tmp_path: Path) -> N
     assert load_config(
         tmp_path,
     ).notifications.initial_implementation_url == "https://example.test/hook"
+
+
+def test_run_config_init_reprompts_malformed_notification_url(
+    tmp_path: Path,
+) -> None:
+    prompts: list[str] = []
+
+    run_config_init(
+        tmp_path,
+        read_line=_answers(
+            "git@github.com:owner/repo.git\n",
+            "\n",
+            "http://[example.com]\n",
+            "https://example.test/hook\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+        ),
+        write_prompt=prompts.append,
+    )
+
+    assert "Notification URLs must be http or https URLs with a host.\n" in prompts
+    assert load_config(
+        tmp_path,
+    ).notifications.initial_implementation_url == "https://example.test/hook"
+
+
+def test_run_config_init_writes_default_prompts_to_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    run_config_init(
+        tmp_path,
+        read_line=_answers(
+            "git@github.com:owner/repo.git\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+            "\n",
+        ),
+    )
+
+    assert stdout.getvalue().startswith("Repository URL: ")
 
 
 def test_run_config_init_leaves_existing_file_when_overwrite_declined(
