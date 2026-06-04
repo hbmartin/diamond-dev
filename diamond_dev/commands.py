@@ -21,6 +21,7 @@ class ComparisonPromptContext:
     """Context supplied to a comparison judge."""
 
     base_branch: str
+    comparison_bundle_file_name: str
     branches: Sequence[ComparisonBranchContext]
 
 
@@ -185,6 +186,9 @@ def comparison_implementation_prompt(
 
 def review_judgment_prompt(
     review_file_name: str,
+    review_judgments_file_name: str,
+    review_provider: str,
+    review_judge: str,
     configured_prompt: str | None = None,
 ) -> str:
     """Return the prompt asking Codex to classify CodeRabbit findings."""
@@ -193,11 +197,20 @@ def review_judgment_prompt(
         fallback_prompt="Evaluate each CodeRabbit review item.",
         required_lines=(
             f"- Review file: `{review_file_name}`",
+            f"- Structured judgment sidecar: `{review_judgments_file_name}`",
+            "- Write valid JSON to the structured judgment sidecar with "
+            "`schema_version`, `review_file`, `review_provider`, "
+            "`review_judge`, and `findings`.",
+            f"- Use `review_provider`: `{review_provider}`.",
+            f"- Use `review_judge`: `{review_judge}`.",
+            "- Each finding must have `id`, `decision`, `confidence`, and "
+            "`rationale`.",
+            "- Allowed decisions are `fix`, `decline`, and `needs_input`.",
             "- Judge each item as (A) should fix, (B) decline fix, or "
             "(C) requirements ambiguous or input needed.",
             "- Append your judgements to the review file without removing "
             "existing content.",
-            "- Commit the updated review file.",
+            "- Commit the updated review file and structured judgment sidecar.",
             "- Do not push; diamond-dev will push committed work.",
         ),
     )
@@ -205,6 +218,7 @@ def review_judgment_prompt(
 
 def review_fix_prompt(
     review_file_name: str,
+    review_judgments_file_name: str,
     configured_prompt: str | None = None,
 ) -> str:
     """Return the prompt asking Codex to implement accepted review fixes."""
@@ -213,8 +227,13 @@ def review_fix_prompt(
         fallback_prompt="Implement accepted CodeRabbit review fixes.",
         required_lines=(
             f"- Review file: `{review_file_name}`",
-            "- Implement every review item judged as (A) should fix.",
+            f"- Structured judgment sidecar: `{review_judgments_file_name}`",
+            "- If the structured judgment sidecar exists and is valid, implement "
+            "every finding with decision `fix`.",
+            "- If the sidecar is missing or invalid, fall back to legacy markdown "
+            "judgments and implement every review item judged as (A) should fix.",
             "- Do not implement items judged as (B) decline fix.",
+            "- Do not implement findings with decision `decline` or `needs_input`.",
             "- Leave items judged as (C) requirements ambiguous or input needed "
             "unchanged.",
             "- Inspect the current branch first because this prompt may be rerun.",
@@ -255,6 +274,8 @@ def _comparison_required_lines(
     )
     return (
         f"- Base branch: `{context.base_branch}`",
+        f"- Comparison bundle: `{context.comparison_bundle_file_name}`",
+        "- Read the comparison bundle before judging branch quality.",
         *branch_lines,
         "- Write the final comparison to `comparison.md` in the current directory.",
         "- Do not modify any implementation repository.",

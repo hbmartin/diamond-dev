@@ -44,9 +44,19 @@ class PlanContext:
         return f"{self.slug}-comparison.md"
 
     @property
+    def comparison_bundle_file_name(self) -> str:
+        """Return the comparison bundle artifact filename."""
+        return f"{self.slug}-comparison-bundle.md"
+
+    @property
     def review_file_name(self) -> str:
         """Return the implementation-repo review filename."""
         return f"{self.slug}-review.md"
+
+    @property
+    def review_judgments_file_name(self) -> str:
+        """Return the structured review judgment sidecar filename."""
+        return f"{self.slug}-review-judgments.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +66,9 @@ class WikiContext:
     url: str
     directory: Path
     comparison_file: Path
+    comparison_bundle_file: Path
     review_file: Path
+    review_judgments_file: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +149,11 @@ class RunContext:
     def comparison_file(self) -> Path:
         """Return the local comparison artifact path."""
         return self.cwd / "comparison.md"
+
+    @property
+    def comparison_bundle_file(self) -> Path:
+        """Return the local comparison bundle artifact path."""
+        return self.cwd / self.plan.comparison_bundle_file_name
 
     def with_implementation(
         self,
@@ -225,7 +242,9 @@ def build_run_context(
             url=wiki_url,
             directory=wiki_dir,
             comparison_file=wiki_dir / f"{plan_slug}-comparison.md",
+            comparison_bundle_file=wiki_dir / f"{plan_slug}-comparison-bundle.md",
             review_file=wiki_dir / f"{plan_slug}-review.md",
+            review_judgments_file=wiki_dir / f"{plan_slug}-review-judgments.json",
         ),
         implementation=ImplementationContext(
             branches=tuple(

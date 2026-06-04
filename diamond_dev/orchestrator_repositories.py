@@ -15,6 +15,7 @@ from diamond_dev.markdown import read_normalized_markdown
 if TYPE_CHECKING:
     from diamond_dev.executor import CommandRunner
     from diamond_dev.git_ops import GitOperations
+    from diamond_dev.providers import GitHubWorkflowProvider
     from diamond_dev.workflow import (
         ImplementationBranch,
         ImplementationContext,
@@ -27,6 +28,7 @@ class RepositoryPreparationMixin:
 
     runner: CommandRunner
     git: GitOperations
+    workflow_provider: GitHubWorkflowProvider
 
     def _prepare_wiki_with_plan(self, context: RunContext) -> None:
         self._ensure_wiki_repo(context)
@@ -49,7 +51,10 @@ class RepositoryPreparationMixin:
             log_prefix="wiki-plan",
             paths=(context.plan.file_name,),
         )
-        self.git.run(context.wiki.directory, "push", log_name="wiki-plan-push")
+        self.workflow_provider.push_wiki(
+            context.wiki.directory,
+            log_name="wiki-plan-push",
+        )
 
     def _ensure_wiki_repo(self, context: RunContext) -> None:
         if context.wiki.directory.exists():
@@ -60,7 +65,7 @@ class RepositoryPreparationMixin:
                 raise DiamondDevError(
                     f"Existing wiki path is not a Git repo: {context.wiki.directory}",
                 )
-            self.git.sync_wiki(context.wiki.directory)
+            self.workflow_provider.sync_wiki(context.wiki.directory)
             return
 
         self.runner.run(
@@ -86,7 +91,7 @@ class RepositoryPreparationMixin:
 
     def _ensure_remote_workflow_branches_absent(self, context: RunContext) -> None:
         for implementation_branch in context.implementation.branches:
-            if self.git.remote_url_branch_exists(
+            if self.workflow_provider.remote_workflow_branch_exists(
                 context.cwd,
                 remote_url=context.config.repository_url,
                 branch=implementation_branch.branch,

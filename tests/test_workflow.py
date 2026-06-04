@@ -34,8 +34,14 @@ def test_build_run_context_uses_effective_wiki_url_for_directory(
     assert context.wiki.comparison_file == tmp_path / "custom-notes.wiki" / (
         "my-plan-comparison.md"
     )
+    assert context.wiki.comparison_bundle_file == tmp_path / "custom-notes.wiki" / (
+        "my-plan-comparison-bundle.md"
+    )
     assert context.wiki.review_file == tmp_path / "custom-notes.wiki" / (
         "my-plan-review.md"
+    )
+    assert context.wiki.review_judgments_file == tmp_path / "custom-notes.wiki" / (
+        "my-plan-review-judgments.json"
     )
 
 

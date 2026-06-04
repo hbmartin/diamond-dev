@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from diamond_dev.errors import DiamondDevError
+from diamond_dev.review_judgments import (
+    read_review_judgments_status,
+    summarize_review_judgments,
+)
 
 if TYPE_CHECKING:
     from diamond_dev.report import PhaseWarning
@@ -102,6 +106,9 @@ def build_pr_body(
     if warnings:
         body_lines.extend(("", "Workflow warnings:"))
         body_lines.extend(_warning_lines(warnings))
+    if review_judgment_lines := _review_judgment_lines(context):
+        body_lines.extend(("", "Structured review judgments:"))
+        body_lines.extend(review_judgment_lines)
     return "\n".join(body_lines)
 
 
@@ -133,3 +140,21 @@ def _workflow_role_lines(context: RunContext) -> list[str]:
         f"- Review fixer: {workflow.review_fixer}",
         f"- Final reviewer: {workflow.final_reviewer}",
     ]
+
+
+def _review_judgment_lines(context: RunContext) -> list[str]:
+    status = read_review_judgments_status(context.wiki.review_judgments_file)
+    if status.status != "valid" or status.judgments is None:
+        return []
+    summary = summarize_review_judgments(status.judgments)
+    lines = [
+        (
+            "- Decisions: "
+            f"fix={summary.fix}, decline={summary.decline}, "
+            f"needs_input={summary.needs_input}"
+        ),
+        f"- Sidecar: {context.wiki.review_judgments_file.name}",
+    ]
+    if summary.needs_input_ids:
+        lines.append(f"- Needs input IDs: {', '.join(summary.needs_input_ids)}")
+    return lines

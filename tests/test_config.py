@@ -55,6 +55,10 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
         "https://example.test/review"
     )
     assert config.notifications.open_pr_url == "https://example.test/open-pr"
+    assert config.comparison.test_commands == ()
+    assert config.comparison.max_total_diff_bytes == 200_000
+    assert config.comparison.max_file_diff_bytes == 40_000
+    assert config.comparison.max_test_output_bytes == 20_000
 
 
 def test_load_config_reads_config_tables(tmp_path: Path) -> None:
@@ -84,7 +88,12 @@ def test_load_config_reads_config_tables(tmp_path: Path) -> None:
         "[agents.claude]\n"
         'model = "opus"\n'
         "[agents.gemini]\n"
-        'model = "gemini-3"',
+        'model = "gemini-3"\n'
+        "[comparison]\n"
+        'test_commands = ["uv run pytest tests/unit"]\n'
+        "max_total_diff_bytes = 1000\n"
+        "max_file_diff_bytes = 200\n"
+        "max_test_output_bytes = 300",
         encoding="utf-8",
     )
 
@@ -105,6 +114,10 @@ def test_load_config_reads_config_tables(tmp_path: Path) -> None:
     assert config.agents.codex.model == "gpt-5"
     assert config.agents.claude.model == "opus"
     assert config.agents.gemini.model == "gemini-3"
+    assert config.comparison.test_commands == ("uv run pytest tests/unit",)
+    assert config.comparison.max_total_diff_bytes == 1000
+    assert config.comparison.max_file_diff_bytes == 200
+    assert config.comparison.max_test_output_bytes == 300
 
 
 def test_load_config_reads_workflow_and_named_agent_alias(tmp_path: Path) -> None:
@@ -287,6 +300,7 @@ def test_load_config_rejects_legacy_table_conflicts(
         'repository_url = "git@github.com:owner/repo.git"\nnotifications = "bad"',
         'repository_url = "git@github.com:owner/repo.git"\nprompts = "bad"',
         'repository_url = "git@github.com:owner/repo.git"\nagents = "bad"',
+        'repository_url = "git@github.com:owner/repo.git"\ncomparison = "bad"',
         (
             'repository_url = "git@github.com:owner/repo.git"\n'
             "[agents]\n"
@@ -301,6 +315,36 @@ def test_load_config_rejects_bad_table_types(
     (tmp_path / CONFIG_FILE_NAME).write_text(config_text, encoding="utf-8")
 
     with pytest.raises(ConfigError, match="must be a table"):
+        load_config(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[comparison]\n"
+            "test_commands = [1]"
+        ),
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[comparison]\n"
+            "max_total_diff_bytes = 0"
+        ),
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[comparison]\n"
+            'max_file_diff_bytes = "large"'
+        ),
+    ],
+)
+def test_load_config_rejects_bad_comparison_values(
+    tmp_path: Path,
+    config_text: str,
+) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(config_text, encoding="utf-8")
+
+    with pytest.raises(ConfigError):
         load_config(tmp_path)
 
 
