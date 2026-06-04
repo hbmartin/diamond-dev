@@ -15,11 +15,23 @@ diamond-dev path/to/my-plan.md
 The command must be run from a directory containing `.diamond-dev.toml`. It takes
 a path to a `.md` plan file.
 
+To create a starter config interactively:
+
+```bash
+diamond-dev init
+```
+
+The initializer asks for the target repository URL, an optional wiki repository
+URL, and optional notification URLs. It writes only `.diamond-dev.toml`; workflow,
+agent, prompt, and comparison settings use the defaults documented below unless
+you edit the generated file.
+
 Useful flags:
 
 - `--config PATH`: Load configuration from a specific TOML file instead of
   `.diamond-dev.toml` in the current directory. Relative paths resolve from the
-  invocation directory.
+  invocation directory. With `init`, this selects the config file to write.
+- `--force`: With `init`, overwrite an existing config file without asking.
 - `--version`: Show the installed `diamond-dev` version.
 
 ## Configuration
