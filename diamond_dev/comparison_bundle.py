@@ -328,7 +328,7 @@ def _capped_lines(
     omitted: list[str] = []
     used_bytes = 0
     for line in lines:
-        line_bytes = len(f"{line}\n".encode())
+        line_bytes = len(f"{line}\n".encode("utf-8"))  # noqa: UP012
         if used_bytes + line_bytes > max_bytes:
             omitted.append(line)
             continue
