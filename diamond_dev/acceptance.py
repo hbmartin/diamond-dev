@@ -49,8 +49,9 @@ def parse_acceptance(
     line = acceptance_lines[0]
     if line == acceptance_checkbox(allowed_agents):
         return None
+    normalized_line = line.replace("[X]", "[x]", 1)
     for agent_name in allowed_agents:
-        if line == accepted_line(agent_name):
+        if normalized_line == accepted_line(agent_name):
             return agent_name
     raise MalformedAcceptanceError(f"Invalid acceptance marker: {line}")
 

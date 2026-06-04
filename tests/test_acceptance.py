@@ -47,6 +47,7 @@ def test_ensure_acceptance_checkbox_uses_configured_agents() -> None:
     ("markdown", "expected"),
     [
         ("- [x] Accept: codex", "codex"),
+        ("- [X] Accept: codex", "codex"),
         ("- [x] Accept: claude", "claude"),
     ],
 )
@@ -79,7 +80,6 @@ def test_parse_acceptance_ignores_non_checkbox_accept_mentions() -> None:
 @pytest.mark.parametrize(
     "markdown",
     [
-        "- [X] Accept: codex",
         "- [x] Accept: both",
         "- [x] Accept: codex\n- [x] Accept: claude",
     ],
