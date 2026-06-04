@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from diamond_dev.config import DiamondDevConfig
-from diamond_dev.workflow import build_run_context
+from diamond_dev.config import (
+    AgentConfig,
+    AgentConfigs,
+    DiamondDevConfig,
+    WorkflowConfig,
+)
+from diamond_dev.workflow import build_run_context, selected_implementation
 
 
 def test_build_run_context_uses_effective_wiki_url_for_directory(
@@ -32,3 +37,42 @@ def test_build_run_context_uses_effective_wiki_url_for_directory(
     assert context.wiki.review_file == tmp_path / "custom-notes.wiki" / (
         "my-plan-review.md"
     )
+
+
+def test_build_run_context_uses_configured_implementers(
+    tmp_path: Path,
+) -> None:
+    plan_path = tmp_path / "My Plan.md"
+    config = DiamondDevConfig(
+        config_path=tmp_path / ".diamond-dev.toml",
+        repository_url="git@github.com:owner/repo.git",
+        agents=AgentConfigs(
+            by_name={
+                "claude-fixer": AgentConfig(adapter="claude"),
+            },
+        ),
+        workflow=WorkflowConfig(
+            implementers=("codex", "claude", "claude-fixer"),
+            comparison_fixer="claude-fixer",
+        ),
+    )
+
+    context = build_run_context(
+        cwd=tmp_path,
+        plan_path=plan_path,
+        config=config,
+    )
+    selected = selected_implementation(context, "codex")
+
+    assert context.implementation.implementer_names == (
+        "codex",
+        "claude",
+        "claude-fixer",
+    )
+    assert context.implementation.branch_for("claude-fixer").repo_dir == (
+        tmp_path / "claude-fixer-my-plan"
+    )
+    assert context.implementation.branch_for("claude-fixer").branch == (
+        "claude-fixer/my-plan"
+    )
+    assert selected.comparison_fixer == "claude-fixer"

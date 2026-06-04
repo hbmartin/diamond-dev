@@ -65,7 +65,11 @@ def test_run_preflight_requires_all_cli_names(
     monkeypatch.setattr(preflight.shutil, "which", which)
 
     with pytest.raises(DiamondDevError, match="gemini"):
-        preflight.run_preflight(runner=_AuthRunner(tmp_path / "logs"), cwd=tmp_path)
+        preflight.run_preflight(
+            runner=_AuthRunner(tmp_path / "logs"),
+            cwd=tmp_path,
+            required_cli_names=("codex", "claude", "gemini", "coderabbit"),
+        )
 
 
 def test_run_preflight_runs_gh_auth_status(
@@ -79,8 +83,12 @@ def test_run_preflight_runs_gh_auth_status(
     )
     runner = _AuthRunner(tmp_path / "logs")
 
-    summary = preflight.run_preflight(runner=runner, cwd=tmp_path)
+    summary = preflight.run_preflight(
+        runner=runner,
+        cwd=tmp_path,
+        required_cli_names=("codex", "claude", "gemini", "coderabbit"),
+    )
 
     assert runner.commands == [("gh", "auth", "status")]
     assert summary.gh_auth_log_path == tmp_path / "logs" / "preflight-gh-auth.log"
-    assert summary.cli_checks[-1].name == "gh"
+    assert any(cli_check.name == "gh" for cli_check in summary.cli_checks)

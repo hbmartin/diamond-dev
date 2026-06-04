@@ -1,10 +1,10 @@
 # diamond-dev
 
-`diamond-dev` orchestrates a multi-agent implementation workflow from a single
-markdown plan. It clones a target repository twice, asks Codex and Claude to
-implement the same plan on separate branches, asks Gemini to compare the work,
-waits for an acceptance choice in the repository wiki, refines the selected
-branch, runs CodeRabbit review, applies accepted fixes, and opens a GitHub PR.
+`diamond-dev` orchestrates a configurable multi-agent implementation workflow
+from a single markdown plan. By default it asks Codex and Claude to implement
+the same plan on separate branches, asks Gemini to compare the work, waits for
+an acceptance choice in the repository wiki, refines the selected branch, runs
+CodeRabbit review, applies accepted fixes, and opens a GitHub PR.
 
 ## Usage
 
@@ -53,10 +53,19 @@ open_pr_url = "https://example.test/open-pr"
 
 [prompts]
 initial_implementation_file = "prompts/initial.md"
-gemini_comparison_file = "prompts/compare.md"
+comparison_judgment_file = "prompts/compare.md"
 comparison_implementation_file = "prompts/followup.md"
 review_judgment_file = "prompts/review-judgment.md"
 review_fix_file = "prompts/review-fixes.md"
+
+[workflow]
+implementers = ["codex", "claude"]
+comparison_judge = "gemini"
+# comparison_fixer is optional; omitted means the first non-selected implementer.
+review_provider = "coderabbit"
+review_judge = "codex"
+review_fixer = "codex"
+final_reviewer = "claude"
 
 [agents.codex]
 model = "gpt-5"
@@ -66,11 +75,23 @@ model = "opus"
 
 [agents.gemini]
 model = "gemini-3"
+
+[agents.claude-fixer]
+adapter = "claude"
+model = "opus"
 ```
 
 Prompt file paths resolve from the config file directory. Prompt overrides
 replace the built-in task instructions while keeping Diamond Dev's required
 workflow context, such as artifact filenames and commit/no-push requirements.
+`[prompts].gemini_comparison_file` and the legacy top-level
+`gemini_comparison_prompt_file` key are still accepted as aliases for
+`[prompts].comparison_judgment_file`.
+
+Agent table names are workflow-local agent names. Built-in names such as
+`codex`, `claude`, `gemini`, and `coderabbit` implicitly use matching adapters.
+Additional agent names must set `adapter` to one of those built-ins, which lets a
+workflow use the same CLI in multiple roles with different models.
 
 Notification URLs are best-effort GET requests. Failures are logged but do not
 stop the workflow.
@@ -78,9 +99,8 @@ stop the workflow.
 Legacy top-level notification keys are still accepted:
 `notify_initial_implementation_url`, `notify_comparison_url`,
 `notify_comparison_implementation_url`, `notify_review_input_needed_url`, and
-`notify_open_pr_url`. The legacy `gemini_comparison_prompt_file` key is also
-accepted as an alias for `[prompts].gemini_comparison_file`. A config fails if
-both the legacy key and the table key are present.
+`notify_open_pr_url`. A config fails if a legacy key and its table replacement
+are both present.
 
 The previous `notes_repository_url` key has been removed. Use
 `wiki_repository_url`; configs that still contain the old key fail at startup.
@@ -89,29 +109,33 @@ The previous `notes_repository_url` key has been removed. Use
 
 Built-in prompt sources:
 
-- [Initial implementation prompt](diamond_dev/commands.py): asks Codex
-  and Claude to implement the plan and commit without pushing.
-- [Comparison follow-up prompt](diamond_dev/commands.py): asks the opposite agent
-  to apply requested follow-up changes from the comparison.
-- [Review judgment prompt](diamond_dev/commands.py): asks Codex to
-  classify CodeRabbit review findings.
-- [Review fix prompt](diamond_dev/commands.py): asks Codex to implement accepted
-  review fixes.
-- [Gemini comparison prompt wrapper](diamond_dev/commands.py): adds
-  required branch, repository, and output-file context to the Gemini prompt.
-- [Fallback Gemini comparison prompt](diamond_dev/commands.py): used when
-  `[prompts].gemini_comparison_file` is unset or empty.
+- [Initial implementation prompt](diamond_dev/commands.py): asks each configured
+  implementer to implement the plan and commit without pushing.
+- [Comparison follow-up prompt](diamond_dev/commands.py): asks the configured
+  comparison fixer to apply requested follow-up changes from the comparison.
+- [Review judgment prompt](diamond_dev/commands.py): asks the configured review
+  judge to classify review findings.
+- [Review fix prompt](diamond_dev/commands.py): asks the configured review fixer
+  to implement accepted review fixes.
+- [Comparison judgment prompt wrapper](diamond_dev/commands.py): adds required
+  branch, repository, and output-file context to the comparison judge prompt.
+- [Fallback comparison judgment prompt](diamond_dev/commands.py): used when
+  `[prompts].comparison_judgment_file` is unset or empty.
 
 Each optional prompt file can replace its matching fallback instructions while
 keeping the required context wrapper.
 
 ## Generated Repositories
 
-For a plan named `My Plan.md`, the command uses the slug `my-plan` and creates:
+For a plan named `My Plan.md`, the command uses the slug `my-plan`. With the
+default implementers it creates:
 
 - `codex-my-plan` on branch `codex/my-plan`
 - `claude-my-plan` on branch `claude/my-plan`
 - `<repo-name>.wiki` for the GitHub Gollum wiki
+
+For custom implementers, generated implementation clones and branches use the
+same pattern: `<agent-name>-my-plan` on branch `<agent-name>/my-plan`.
 
 The wiki clone is reused if present and synchronized with fast-forward-only
 pulls. On a fresh run, `diamond-dev` clones the implementation repository once,
@@ -139,9 +163,9 @@ causes plan drift failure when the wiki or implementation-clone copy no longer
 matches the source. Use a new plan filename/slug, or reset the generated
 repositories and wiki artifacts, to start a different plan.
 
-Auto-resume requires both `codex-<slug>` and `claude-<slug>` to exist as Git
-repositories with the configured `repository_url` as `origin`. If exactly one
-clone is missing, or workflow branches exist on origin while local clones are
+Auto-resume requires every configured implementer clone to exist as a Git
+repository with the configured `repository_url` as `origin`. If only some clones
+are missing, or workflow branches exist on origin while local clones are
 missing, the run fails clearly.
 
 Branch resume rules:
@@ -160,17 +184,17 @@ Artifact resume rules:
   acceptance checkbox added when missing.
 - If only a local review file exists, it is promoted to the wiki.
 - If local and wiki review files both exist and differ, the run fails.
-- Existing review files do not skip Codex review fixes; fixes rerun when resume
-  reaches the review phase.
+- Existing review files do not skip the configured review fixer; fixes rerun
+  when resume reaches the review phase.
 - Existing PRs for the selected branch, open, closed, or merged, fail before PR
   creation.
 - Notifications are sent only for phases completed by the current process.
 
 ## Acceptance
 
-Gemini must write `comparison.md` in the invocation directory. The command then
-appends this exact line and pushes the file to the GitHub Gollum wiki as
-`<slug>-comparison.md`:
+The configured comparison judge must write `comparison.md` in the invocation
+directory. The command then appends this default line and pushes the file to the
+GitHub Gollum wiki as `<slug>-comparison.md`:
 
 ```markdown
 - [ ] Accept: (codex/claude)
@@ -183,14 +207,18 @@ The workflow accepts only one of these edited values:
 - [x] Accept: claude
 ```
 
+With custom implementers, the checkbox and accepted values use the configured
+implementer names, for example `- [ ] Accept: (codex/claude/aider)`.
+
 Malformed acceptance markers fail immediately. The command checks once
 immediately, then waits 2 minutes, then retries with waits of 3 through 12
 minutes.
 
 ## External CLIs
 
-The workflow expects these commands to be installed and authenticated where
-needed:
+The workflow expects `git`, `gh`, and the CLIs for configured agent adapters to
+be installed and authenticated where needed. With the default workflow that
+means:
 
 - `git`
 - `codex`
@@ -206,7 +234,7 @@ matching root lockfiles:
 - `pnpm` for `pnpm-lock.yaml`
 
 Before cloning or launching agents, `diamond-dev` runs a fast preflight that
-checks these commands are available on `PATH` and verifies `gh auth status`.
+checks configured commands are available on `PATH` and verifies `gh auth status`.
 
 Agent subprocess logs are written under `logs/` and streamed through Loguru.
 Agents commit their changes; `diamond-dev` pushes committed work. If uncommitted

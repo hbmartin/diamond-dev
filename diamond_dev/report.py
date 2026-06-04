@@ -104,16 +104,15 @@ def _context_payload(context: RunContext | None) -> dict[str, object] | None:
         "plan_path": str(context.plan.path),
         "repository_url": context.config.repository_url,
         "wiki_repository_url": context.wiki.url,
-        "branches": {
-            "base": context.implementation.base_branch,
-            "codex": context.implementation.codex_branch,
-            "claude": context.implementation.claude_branch,
-        },
+        "branches": _branch_payload(context),
         "repositories": {
             "wiki": str(context.wiki.directory),
-            "codex": str(context.implementation.codex_dir),
-            "claude": str(context.implementation.claude_dir),
+            **{
+                branch.agent_name: str(branch.repo_dir)
+                for branch in context.implementation.branches
+            },
         },
+        "workflow_roles": _workflow_roles_payload(context),
         "artifacts": {
             "comparison": str(context.wiki.comparison_file),
             "review": str(context.wiki.review_file),
@@ -138,9 +137,32 @@ def _selected_payload(
 
     return {
         "accepted_agent": selected.accepted_agent,
-        "opposite_agent": selected.opposite_agent,
+        "comparison_fixer": selected.comparison_fixer,
         "branch": selected.branch,
         "repo_dir": str(selected.repo_dir),
+    }
+
+
+def _branch_payload(context: RunContext) -> dict[str, object]:
+    return {
+        "base": context.implementation.base_branch,
+        **{
+            branch.agent_name: branch.branch
+            for branch in context.implementation.branches
+        },
+    }
+
+
+def _workflow_roles_payload(context: RunContext) -> dict[str, object]:
+    workflow = context.config.workflow
+    return {
+        "implementers": list(workflow.implementers),
+        "comparison_judge": workflow.comparison_judge,
+        "comparison_fixer": workflow.comparison_fixer,
+        "review_provider": workflow.review_provider,
+        "review_judge": workflow.review_judge,
+        "review_fixer": workflow.review_fixer,
+        "final_reviewer": workflow.final_reviewer,
     }
 
 

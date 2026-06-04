@@ -24,6 +24,7 @@ from diamond_dev.pr import build_pr_body
 from diamond_dev.report import PhaseWarning
 from diamond_dev.workflow import (
     DirtyRecord,
+    ImplementationBranch,
     ImplementationContext,
     PlanContext,
     RunContext,
@@ -420,10 +421,20 @@ def build_context(tmp_path: Path) -> RunContext:
             review_file=tmp_path / "repo.wiki" / "my-plan-review.md",
         ),
         implementation=ImplementationContext(
-            codex_dir=tmp_path / "codex-my-plan",
-            claude_dir=tmp_path / "claude-my-plan",
-            codex_branch="codex/my-plan",
-            claude_branch="claude/my-plan",
+            branches=(
+                ImplementationBranch(
+                    agent_name="codex",
+                    repo_dir=tmp_path / "codex-my-plan",
+                    branch="codex/my-plan",
+                    log_prefix="codex",
+                ),
+                ImplementationBranch(
+                    agent_name="claude",
+                    repo_dir=tmp_path / "claude-my-plan",
+                    branch="claude/my-plan",
+                    log_prefix="claude",
+                ),
+            ),
             base_branch="main",
         ),
     )
@@ -617,6 +628,59 @@ def test_run_reports_warning_status_when_coderabbit_review_fails(
     assert "Workflow warnings:" in pr_body
     assert "CodeRabbit review (failed)" in pr_body
     assert "Codex review fixes (skipped)" in pr_body
+
+
+def test_run_uses_configured_review_fixer_and_final_reviewer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = tmp_path / "My Plan.md"
+    plan_path.write_text("# My Plan\n", encoding="utf-8")
+    (tmp_path / ".diamond-dev.toml").write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'wiki_repository_url = "git@github.com:owner/repo.wiki.git"\n'
+        "[workflow]\n"
+        'review_fixer = "claude-fixer"\n'
+        'final_reviewer = "claude-reviewer"\n'
+        "[agents.claude-fixer]\n"
+        'adapter = "claude"\n'
+        'model = "opus"\n'
+        "[agents.claude-reviewer]\n"
+        'adapter = "claude"\n'
+        'model = "sonnet"\n',
+        encoding="utf-8",
+    )
+    runner = _ScriptedRunner(tmp_path / "logs")
+    monkeypatch.setattr(
+        "diamond_dev.preflight.shutil.which",
+        lambda cli_name: f"/usr/bin/{cli_name}",
+    )
+    monkeypatch.setattr("diamond_dev.orchestrator.acceptance_wait_delays", lambda: (0,))
+    orchestrator = DiamondDevOrchestrator(
+        cwd=tmp_path,
+        runner=runner,
+        sleep=lambda _seconds: None,
+    )
+
+    exit_code = orchestrator.run(plan_path)
+
+    assert exit_code == 0
+    assert any(
+        command[:3] == ("claude", "--model", "opus")
+        for command in runner.commands
+    )
+    assert runner.interactive_commands[-1] == (
+        "claude",
+        "--model",
+        "sonnet",
+        "--permission-mode",
+        "bypassPermissions",
+        "--dangerously-skip-permissions",
+        "/review 123",
+    )
+    report = json.loads((tmp_path / "logs" / "run-report.json").read_text())
+    assert report["context"]["workflow_roles"]["review_fixer"] == "claude-fixer"
+    assert report["context"]["workflow_roles"]["final_reviewer"] == "claude-reviewer"
 
 
 def test_build_pr_body_includes_dirty_records(tmp_path: Path) -> None:

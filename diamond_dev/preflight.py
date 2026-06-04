@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -14,7 +15,7 @@ from diamond_dev.errors import DiamondDevError
 if TYPE_CHECKING:
     from diamond_dev.executor import CommandRunner
 
-REQUIRED_CLI_NAMES: Final = ("git", "codex", "claude", "gemini", "coderabbit", "gh")
+REQUIRED_CORE_CLI_NAMES: Final = ("git", "gh")
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,12 +34,18 @@ class PreflightSummary:
     gh_auth_log_path: Path
 
 
-def run_preflight(*, runner: CommandRunner, cwd: Path) -> PreflightSummary:
+def run_preflight(
+    *,
+    runner: CommandRunner,
+    cwd: Path,
+    required_cli_names: Sequence[str] = (),
+) -> PreflightSummary:
     """Fail quickly when required external commands or GitHub auth are missing."""
     cli_checks: list[CliCheck] = []
     missing_cli_names: list[str] = []
+    cli_names = tuple(dict.fromkeys((*REQUIRED_CORE_CLI_NAMES, *required_cli_names)))
 
-    for cli_name in REQUIRED_CLI_NAMES:
+    for cli_name in cli_names:
         cli_path = shutil.which(cli_name)
         if cli_path is None:
             missing_cli_names.append(cli_name)
@@ -54,7 +61,7 @@ def run_preflight(*, runner: CommandRunner, cwd: Path) -> PreflightSummary:
         cwd=cwd,
         log_name="preflight-gh-auth",
     )
-    logger.info("Preflight checks passed for {}", ", ".join(REQUIRED_CLI_NAMES))
+    logger.info("Preflight checks passed for {}", ", ".join(cli_names))
     return PreflightSummary(
         cli_checks=tuple(cli_checks),
         gh_auth_log_path=gh_auth_result.log_path,

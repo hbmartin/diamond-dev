@@ -3,52 +3,66 @@
 from __future__ import annotations
 
 import re
-from typing import Final, Literal
+from collections.abc import Sequence
+from typing import Final
 
 from diamond_dev.errors import MalformedAcceptanceError
 
-type AgentChoice = Literal["codex", "claude"]
-
+DEFAULT_ACCEPTANCE_AGENTS: Final = ("codex", "claude")
 ACCEPTANCE_CHECKBOX: Final = "- [ ] Accept: (codex/claude)"
-CODEX_ACCEPTED_LINE: Final = "- [x] Accept: codex"
-CLAUDE_ACCEPTED_LINE: Final = "- [x] Accept: claude"
 _ACCEPTANCE_LINE_PATTERN: Final = re.compile(r"^- \[[ xX]\] Accept:")
 
 
-def append_acceptance_checkbox(markdown: str) -> str:
+def append_acceptance_checkbox(
+    markdown: str,
+    agent_names: Sequence[str] = DEFAULT_ACCEPTANCE_AGENTS,
+) -> str:
     """Append the deterministic acceptance checkbox to markdown content."""
     separator = "" if markdown.endswith("\n") else "\n"
-    return f"{markdown}{separator}{ACCEPTANCE_CHECKBOX}\n"
+    return f"{markdown}{separator}{acceptance_checkbox(agent_names)}\n"
 
 
-def ensure_acceptance_checkbox(markdown: str) -> str:
+def ensure_acceptance_checkbox(
+    markdown: str,
+    agent_names: Sequence[str] = DEFAULT_ACCEPTANCE_AGENTS,
+) -> str:
     """Return markdown with exactly one valid acceptance marker."""
     acceptance_lines = _acceptance_lines(markdown)
     if acceptance_lines:
-        parse_acceptance(markdown)
+        parse_acceptance(markdown, agent_names)
         return markdown
-    return append_acceptance_checkbox(markdown)
+    return append_acceptance_checkbox(markdown, agent_names)
 
 
-def parse_acceptance(markdown: str) -> AgentChoice | None:
+def parse_acceptance(
+    markdown: str,
+    agent_names: Sequence[str] = DEFAULT_ACCEPTANCE_AGENTS,
+) -> str | None:
     """Parse the comparison acceptance marker."""
+    allowed_agents = tuple(agent_names)
     acceptance_lines = _acceptance_lines(markdown)
     if not acceptance_lines:
         return None
     if len(acceptance_lines) > 1:
         raise MalformedAcceptanceError("Comparison file has multiple accept markers")
 
-    match acceptance_lines[0]:
-        case "- [ ] Accept: (codex/claude)":
-            return None
-        case "- [x] Accept: codex":
-            return "codex"
-        case "- [x] Accept: claude":
-            return "claude"
-        case invalid_line:
-            raise MalformedAcceptanceError(
-                f"Invalid acceptance marker: {invalid_line}",
-            )
+    line = acceptance_lines[0]
+    if line == acceptance_checkbox(allowed_agents):
+        return None
+    for agent_name in allowed_agents:
+        if line == accepted_line(agent_name):
+            return agent_name
+    raise MalformedAcceptanceError(f"Invalid acceptance marker: {line}")
+
+
+def acceptance_checkbox(agent_names: Sequence[str]) -> str:
+    """Return the unchecked acceptance marker for allowed agents."""
+    return f"- [ ] Accept: ({'/'.join(agent_names)})"
+
+
+def accepted_line(agent_name: str) -> str:
+    """Return the checked acceptance marker for one agent."""
+    return f"- [x] Accept: {agent_name}"
 
 
 def acceptance_wait_delays() -> tuple[int, ...]:

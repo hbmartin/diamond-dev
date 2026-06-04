@@ -6,7 +6,7 @@ import pytest
 
 from diamond_dev.acceptance import (
     ACCEPTANCE_CHECKBOX,
-    AgentChoice,
+    acceptance_checkbox,
     acceptance_wait_delays,
     append_acceptance_checkbox,
     ensure_acceptance_checkbox,
@@ -37,6 +37,12 @@ def test_ensure_acceptance_checkbox_appends_missing_marker() -> None:
     assert markdown == f"# Comparison\n{ACCEPTANCE_CHECKBOX}\n"
 
 
+def test_ensure_acceptance_checkbox_uses_configured_agents() -> None:
+    markdown = ensure_acceptance_checkbox("# Comparison", ("codex", "claude", "aider"))
+
+    assert markdown == "# Comparison\n- [ ] Accept: (codex/claude/aider)\n"
+
+
 @pytest.mark.parametrize(
     ("markdown", "expected"),
     [
@@ -46,9 +52,22 @@ def test_ensure_acceptance_checkbox_appends_missing_marker() -> None:
 )
 def test_parse_acceptance_checked_values(
     markdown: str,
-    expected: AgentChoice,
+    expected: str,
 ) -> None:
     assert parse_acceptance(markdown) == expected
+
+
+def test_parse_acceptance_accepts_configured_agent() -> None:
+    assert parse_acceptance(
+        "- [x] Accept: aider",
+        ("codex", "claude", "aider"),
+    ) == "aider"
+
+
+def test_acceptance_checkbox_formats_agent_list() -> None:
+    assert acceptance_checkbox(("codex", "claude", "aider")) == (
+        "- [ ] Accept: (codex/claude/aider)"
+    )
 
 
 def test_parse_acceptance_ignores_non_checkbox_accept_mentions() -> None:

@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonBranchContext:
+    """One implementation branch supplied to a comparison judge."""
+
+    agent_name: str
+    branch: str
+    repo_dir: Path
+
+
+@dataclass(frozen=True, slots=True)
 class ComparisonPromptContext:
-    """Context supplied to Gemini for branch comparison."""
+    """Context supplied to a comparison judge."""
 
     base_branch: str
-    codex_branch: str
-    claude_branch: str
-    codex_dir: Path
-    claude_dir: Path
+    branches: Sequence[ComparisonBranchContext]
 
 
 def build_codex_command(
@@ -222,27 +229,35 @@ def gemini_comparison_prompt(
     configured_prompt: str | None,
     context: ComparisonPromptContext,
 ) -> str:
-    """Return the Gemini comparison prompt with mandatory run context."""
+    """Return the comparison judgment prompt with mandatory run context."""
     return _prompt_with_required_context(
         configured_prompt,
         fallback_prompt=_fallback_prompt(),
-        required_lines=(
-            f"- Base branch: `{context.base_branch}`",
-            f"- Codex branch: `{context.codex_branch}` in `{context.codex_dir}`",
-            f"- Claude branch: `{context.claude_branch}` in `{context.claude_dir}`",
-            "- Write the final comparison to `comparison.md` in the current "
-            "directory.",
-            "- Do not modify either implementation repository.",
-        ),
+        required_lines=_comparison_required_lines(context),
     )
 
 
 def _fallback_prompt() -> str:
     return (
-        "Compare the Codex and Claude implementation branches against the base "
-        "branch. Evaluate correctness, completeness, maintainability, tests, and "
-        "risk. Recommend either Codex or Claude as the base implementation and "
-        "describe any follow-up changes the opposite agent should apply."
+        "Compare the implementation branches against the base branch. Evaluate "
+        "correctness, completeness, maintainability, tests, and risk. Recommend "
+        "one implementation as the base and describe any follow-up changes the "
+        "comparison fixer should apply."
+    )
+
+
+def _comparison_required_lines(
+    context: ComparisonPromptContext,
+) -> tuple[str, ...]:
+    branch_lines = tuple(
+        f"- {branch.agent_name} branch: `{branch.branch}` in `{branch.repo_dir}`"
+        for branch in context.branches
+    )
+    return (
+        f"- Base branch: `{context.base_branch}`",
+        *branch_lines,
+        "- Write the final comparison to `comparison.md` in the current directory.",
+        "- Do not modify any implementation repository.",
     )
 
 
