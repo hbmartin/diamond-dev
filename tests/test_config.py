@@ -261,3 +261,18 @@ def test_read_gemini_prompt_wraps_read_failures(
 
     with pytest.raises(ConfigError):
         read_gemini_prompt(load_config(tmp_path))
+
+
+def test_read_gemini_prompt_wraps_decode_failures(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "compare.md"
+    prompt_file.write_bytes(b"\xff")
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'gemini_comparison_prompt_file = "compare.md"',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as exc_info:
+        read_gemini_prompt(load_config(tmp_path))
+
+    assert isinstance(exc_info.value.__cause__, UnicodeDecodeError)

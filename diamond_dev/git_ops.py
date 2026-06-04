@@ -312,10 +312,18 @@ class GitOperations:
         label: str,
         repo_dir: Path,
         branch: str,
+        log_prefix: str | None = None,
     ) -> RunContext:
         """Record dirty files, then push a workflow branch."""
-        updated_context = self.record_dirty_files(context, label, repo_dir, branch)
-        self.push_branch(repo_dir, branch, log_name=f"{label}-push")
+        command_log_prefix = log_prefix or label
+        updated_context = self.record_dirty_files(
+            context,
+            label,
+            repo_dir,
+            branch,
+            log_prefix=command_log_prefix,
+        )
+        self.push_branch(repo_dir, branch, log_name=f"{command_log_prefix}-push")
         return updated_context
 
     def push_branch(self, repo_dir: Path, branch: str, *, log_name: str) -> None:
@@ -328,9 +336,15 @@ class GitOperations:
         label: str,
         repo_dir: Path,
         branch: str,
+        *,
+        log_prefix: str | None = None,
     ) -> RunContext:
         """Append dirty files observed after an agent phase."""
-        dirty_files = self.dirty_files(repo_dir, log_name=f"{label}-dirty-status")
+        command_log_prefix = log_prefix or label
+        dirty_files = self.dirty_files(
+            repo_dir,
+            log_name=f"{command_log_prefix}-dirty-status",
+        )
         if not dirty_files:
             return context
 

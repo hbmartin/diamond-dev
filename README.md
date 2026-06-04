@@ -80,7 +80,7 @@ Legacy top-level notification keys are still accepted:
 `notify_comparison_implementation_url`, `notify_review_input_needed_url`, and
 `notify_open_pr_url`. The legacy `gemini_comparison_prompt_file` key is also
 accepted as an alias for `[prompts].gemini_comparison_file`. A config fails if
-both the legacy key and the table key set the same value.
+both the legacy key and the table key are present.
 
 The previous `notes_repository_url` key has been removed. Use
 `wiki_repository_url`; configs that still contain the old key fail at startup.
@@ -122,12 +122,19 @@ After each implementation clone is prepared on its workflow branch,
 it runs `uv sync --locked`; if `pnpm-lock.yaml` exists, it runs
 `pnpm install --frozen-lockfile`. Repositories with both lockfiles run both
 commands in that order. Repositories with neither lockfile skip package install.
+These install commands can execute dependency lifecycle scripts from the target
+repository, so run `diamond-dev` only against repositories you trust.
 
 ## Auto-Resume
 
 `diamond-dev` does not write checkpoint files. Rerunning the same plan
 automatically resumes from existing local implementation clones, workflow branch
 state, wiki artifacts, and PR state.
+
+The source plan file is immutable for resume. Editing the plan after a run starts
+causes plan drift failure when the wiki or implementation-clone copy no longer
+matches the source. Use a new plan filename/slug, or reset the generated
+repositories and wiki artifacts, to start a different plan.
 
 Auto-resume requires both `codex-<slug>` and `claude-<slug>` to exist as Git
 repositories with the configured `repository_url` as `origin`. If exactly one
@@ -150,7 +157,10 @@ Artifact resume rules:
   acceptance checkbox added when missing.
 - If only a local review file exists, it is promoted to the wiki.
 - If local and wiki review files both exist and differ, the run fails.
-- Existing PRs for the selected branch, open or closed, fail before PR creation.
+- Existing review files do not skip Codex review fixes; fixes rerun when resume
+  reaches the review phase.
+- Existing PRs for the selected branch, open, closed, or merged, fail before PR
+  creation.
 - Notifications are sent only for phases completed by the current process.
 
 ## Acceptance
