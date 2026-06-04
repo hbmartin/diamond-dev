@@ -1,8 +1,11 @@
 # diamond-dev
 
+[![PyPI](https://img.shields.io/pypi/v/diamond-dev.svg)](https://pypi.org/project/diamond-dev/)
 [![CI](https://github.com/hbmartin/diamond-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/hbmartin/diamond-dev/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hbmartin/diamond-dev)
 
 `diamond-dev` orchestrates a configurable multi-agent implementation workflow
 from a single markdown plan. By default it asks two coding agents (Codex and
@@ -487,5 +490,4 @@ GitHub wiki. Per-run logs and `run-report.json` are under `logs/`.
 
 ## License
 
-`diamond-dev` is licensed under the Apache License, Version 2.0. See
-[LICENSE](LICENSE) for details.
+`diamond-dev` is (C) 2026 Harold Martin and licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
