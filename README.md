@@ -1,10 +1,137 @@
 # diamond-dev
 
+[![CI](https://github.com/hbmartin/diamond-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/hbmartin/diamond-dev/actions/workflows/ci.yml)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+
 `diamond-dev` orchestrates a configurable multi-agent implementation workflow
-from a single markdown plan. By default it asks Codex and Claude to implement
-the same plan on separate branches, asks Gemini to compare the work, waits for
-an acceptance choice in the repository wiki, refines the selected branch, runs
-CodeRabbit review, applies accepted fixes, and opens a GitHub PR.
+from a single markdown plan. By default it asks two coding agents (Codex and
+Claude) to implement the same plan on separate branches, asks a third agent
+(Gemini) to compare the results, waits for you to accept one branch in the
+repository wiki, refines the selected branch, runs a CodeRabbit review, applies
+the accepted fixes, and opens a GitHub PR.
+
+## Workflow
+
+```mermaid
+flowchart TD
+    plan["📄 markdown plan"] --> impl
+    subgraph impl["1 · Implement in parallel"]
+        codex["codex/&lt;slug&gt;"]
+        claude["claude/&lt;slug&gt;"]
+    end
+    impl --> bundle["2 · Build deterministic comparison bundle"]
+    bundle --> judge["3 · Gemini compares branches → comparison.md (wiki)"]
+    judge --> accept{"4 · You accept one branch<br/>in the wiki"}
+    accept --> refine["5 · Refine the accepted branch"]
+    refine --> review["6 · CodeRabbit review → judge findings → apply accepted fixes"]
+    review --> finalpr["7 · Final review → open GitHub PR"]
+```
+
+1. **Implement** — each configured implementer (default `codex`, `claude`)
+   implements the plan on its own branch and commits without pushing.
+2. **Bundle** — `diamond-dev` builds a deterministic comparison bundle (branch
+   metadata, diffs, optional test results) for the judge to read.
+3. **Compare** — the comparison judge (default `gemini`) writes `comparison.md`,
+   which is pushed to the GitHub wiki with an acceptance checkbox.
+4. **Accept** — you check exactly one box in the wiki to choose a branch. The
+   workflow polls the wiki and resumes when it sees your choice.
+5. **Refine** — the accepted branch is refined per the comparison follow-up.
+6. **Review** — CodeRabbit reviews the branch, the review judge classifies each
+   finding, and the review fixer applies accepted fixes.
+7. **PR** — a final reviewer runs and `diamond-dev` opens a GitHub PR.
+
+> ⚠️ **Security:** `diamond-dev` runs coding agents with their sandbox and
+> approval prompts disabled, and executes package-install and test commands from
+> the target repository. Run it only against repositories and plans you trust.
+> See [Security](#security).
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Quickstart](#quickstart)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Prompts](#prompts)
+- [Generated Repositories](#generated-repositories)
+- [Auto-Resume](#auto-resume)
+- [Acceptance & Review Judgments](#acceptance--review-judgments)
+- [Security](#security)
+- [Logging](#logging)
+- [Troubleshooting & FAQ](#troubleshooting--faq)
+- [License](#license)
+
+## Prerequisites
+
+- **Python 3.14+**
+- **External CLIs**, installed and authenticated where needed. The default
+  workflow needs:
+  - `git`
+  - `gh` (authenticated — `diamond-dev` verifies `gh auth status` at startup)
+  - `codex`
+  - `claude`
+  - `gemini`
+  - `coderabbit`
+- **Optional CLIs**, required only when the cloned target repository has matching
+  root lockfiles:
+  - `uv` — for `uv.lock` (`uv sync --locked`)
+  - `pnpm` — for `pnpm-lock.yaml` (`pnpm install --frozen-lockfile`)
+
+Before cloning or launching agents, `diamond-dev` runs a fast preflight that
+checks the configured commands are available on `PATH` and verifies
+`gh auth status`. When you use custom agents, only the CLIs for the adapters you
+configure are required.
+
+## Installation
+
+`diamond-dev` targets Python 3.14+. The recommended installer is
+[`uv`](https://docs.astral.sh/uv/).
+
+Install the CLI directly from the repository:
+
+```bash
+uv tool install git+https://github.com/hbmartin/diamond-dev.git
+```
+
+Or clone and install from source for development:
+
+```bash
+git clone https://github.com/hbmartin/diamond-dev.git
+cd diamond-dev
+uv sync --all-groups
+uv run diamond-dev --version
+```
+
+## Quickstart
+
+```bash
+# 1. Generate a starter config in your working directory.
+diamond-dev init
+
+# 2. Write a plan describing the change you want.
+$EDITOR my-plan.md
+
+# 3. Run the workflow.
+diamond-dev my-plan.md
+```
+
+`init` asks for the target repository URL, an optional wiki repository URL, and
+optional notification URLs, then writes `.diamond-dev.toml`. Everything else uses
+the defaults described under [Configuration](#configuration).
+
+When the run reaches step 3 of the workflow, it **pauses for your input**. Open
+the comparison page in the repository's GitHub wiki (`<slug>-comparison.md`),
+read Gemini's comparison of the two branches, and check exactly one box:
+
+```markdown
+- [x] Accept: codex
+```
+
+`diamond-dev` polls the wiki, sees your choice, and resumes automatically —
+refining the accepted branch, running the review, and opening the PR. You do not
+need to restart the command; if it has exited, rerunning `diamond-dev my-plan.md`
+[auto-resumes](#auto-resume) from where it left off.
 
 ## Usage
 
@@ -12,8 +139,8 @@ CodeRabbit review, applies accepted fixes, and opens a GitHub PR.
 diamond-dev path/to/my-plan.md
 ```
 
-The command must be run from a directory containing `.diamond-dev.toml`. It takes
-a path to a `.md` plan file.
+The command must be run from a directory containing `.diamond-dev.toml` (or pass
+`--config`). It takes a path to a `.md` plan file.
 
 To create a starter config interactively:
 
@@ -102,9 +229,6 @@ model = "opus"
 Prompt file paths resolve from the config file directory. Prompt overrides
 replace the built-in task instructions while keeping Diamond Dev's required
 workflow context, such as artifact filenames and commit/no-push requirements.
-`[prompts].gemini_comparison_file` and the legacy top-level
-`gemini_comparison_prompt_file` key are still accepted as aliases for
-`[prompts].comparison_judgment_file`.
 
 Agent table names are workflow-local agent names. Built-in names such as
 `codex`, `claude`, `gemini`, and `coderabbit` implicitly use matching adapters.
@@ -122,6 +246,13 @@ are trusted project-specific commands. If they leave uncommitted files,
 Notification URLs are best-effort GET requests. Failures are logged but do not
 stop the workflow.
 
+<details>
+<summary>Legacy and removed keys (migration)</summary>
+
+`[prompts].gemini_comparison_file` and the legacy top-level
+`gemini_comparison_prompt_file` key are still accepted as aliases for
+`[prompts].comparison_judgment_file`.
+
 Legacy top-level notification keys are still accepted:
 `notify_initial_implementation_url`, `notify_comparison_url`,
 `notify_comparison_implementation_url`, `notify_review_input_needed_url`, and
@@ -131,26 +262,32 @@ are both present.
 The previous `notes_repository_url` key has been removed. Use
 `wiki_repository_url`; configs that still contain the old key fail at startup.
 
+</details>
+
 ## Prompts
 
-Built-in prompt sources:
+Each built-in prompt has a fallback that can be replaced by a configured prompt
+file (see the `[prompts]` table); overrides keep the required context wrapper.
+The prompt builders live in
+[`diamond_dev/commands.py`](diamond_dev/commands.py):
 
-- [Initial implementation prompt](diamond_dev/commands.py): asks each configured
-  implementer to implement the plan and commit without pushing.
-- [Comparison follow-up prompt](diamond_dev/commands.py): asks the configured
-  comparison fixer to apply requested follow-up changes from the comparison.
-- [Review judgment prompt](diamond_dev/commands.py): asks the configured review
-  judge to classify review findings and write `<slug>-review-judgments.json`.
-- [Review fix prompt](diamond_dev/commands.py): asks the configured review fixer
-  to implement accepted review fixes, preferring the JSON sidecar when valid and
-  falling back to legacy markdown judgments when it is absent or malformed.
-- [Comparison judgment prompt wrapper](diamond_dev/commands.py): adds required
+- [`initial_implementation_prompt`](diamond_dev/commands.py#L153): asks each
+  configured implementer to implement the plan and commit without pushing.
+- [`comparison_implementation_prompt`](diamond_dev/commands.py#L169): asks the
+  configured comparison fixer to apply requested follow-up changes from the
+  comparison.
+- [`review_judgment_prompt`](diamond_dev/commands.py#L187): asks the configured
+  review judge to classify review findings and write
+  `<slug>-review-judgments.json`.
+- [`review_fix_prompt`](diamond_dev/commands.py#L219): asks the configured review
+  fixer to implement accepted review fixes, preferring the JSON sidecar when
+  valid and falling back to legacy markdown judgments when it is absent or
+  malformed.
+- [`gemini_comparison_prompt`](diamond_dev/commands.py#L247): adds required
   branch, repository, and output-file context to the comparison judge prompt.
-- [Fallback comparison judgment prompt](diamond_dev/commands.py): used when
-  `[prompts].comparison_judgment_file` is unset or empty.
-
-Each optional prompt file can replace its matching fallback instructions while
-keeping the required context wrapper.
+- [`_fallback_prompt`](diamond_dev/commands.py#L259): the built-in comparison
+  judgment prompt used when `[prompts].comparison_judgment_file` is unset or
+  empty.
 
 ## Generated Repositories
 
@@ -177,7 +314,7 @@ checks that clone root for package lockfiles. If `uv.lock` exists, it runs
 commands in that order in each clone. Repositories with neither lockfile skip
 package install. These install commands can execute dependency lifecycle scripts
 from the target repository, so run `diamond-dev` only against repositories you
-trust.
+trust (see [Security](#security)).
 
 ## Auto-Resume
 
@@ -221,7 +358,7 @@ Artifact resume rules:
   creation.
 - Notifications are sent only for phases completed by the current process.
 
-## Acceptance
+## Acceptance & Review Judgments
 
 Before comparison judgment, `diamond-dev` writes
 `<slug>-comparison-bundle.md` in the invocation directory and wiki. The bundle
@@ -257,37 +394,37 @@ Review judgment creates a machine-readable sidecar named
 `Structured review judgments` section in `<slug>-review.md`; the PR body only
 includes compact decision counts and any `needs_input` IDs.
 
-## External CLIs
+## Security
 
-The workflow expects `git`, `gh`, and the CLIs for configured agent adapters to
-be installed and authenticated where needed. With the default workflow that
-means:
+`diamond-dev` executes code on your machine from two untrusted-by-default
+sources — the coding agents and the target repository — so run it **only against
+repositories and plans you trust**:
 
-- `git`
-- `codex`
-- `claude`
-- `gemini`
-- `coderabbit`
-- `gh`
+- **Agents run with sandbox and approval prompts disabled.** Implementers are
+  launched non-interactively with full edit permissions:
+  `codex exec --dangerously-bypass-approvals-and-sandbox`,
+  `claude -p --permission-mode bypassPermissions --dangerously-skip-permissions`,
+  and `gemini -p … --skip-trust -y`. The agents can read and write files and run
+  commands in their clones without prompting.
+- **Package install runs repository lifecycle scripts.** When a clone contains
+  `uv.lock` or `pnpm-lock.yaml`, `diamond-dev` runs the matching install command,
+  which can execute dependency lifecycle scripts defined by the target
+  repository.
+- **Comparison test commands are trusted and run via `sh -lc`.** Any
+  `[comparison].test_commands` you configure run in each implementation clone.
+- **Logs may contain secrets.** Loguru exception logs include local variable
+  values by default. Set `DIAMOND_DEV_LOG_DIAGNOSE=0` (or `false`/`no`/`off`) to
+  disable this if your logs may capture sensitive values.
 
-The following commands are required only when the cloned target repository has
-matching root lockfiles:
+## Logging
 
-- `uv` for `uv.lock`
-- `pnpm` for `pnpm-lock.yaml`
-
-Before cloning or launching agents, `diamond-dev` runs a fast preflight that
-checks configured commands are available on `PATH` and verifies `gh auth status`.
+`diamond-dev` uses Loguru for console, readable text file, and JSONL file
+logging. Logs are written to stderr, `logs/diamond-dev.log`, and
+`logs/diamond-dev.jsonl` by default.
 
 Agent subprocess logs are written under `logs/` and streamed through Loguru.
 Agents commit their changes; `diamond-dev` pushes committed work. If uncommitted
 files remain, they are logged and included in the final PR body.
-
-## Logging
-
-diamond-dev uses Loguru for console, readable text file, and JSONL file logging.
-Logs are written to stderr, `logs/diamond-dev.log`, and
-`logs/diamond-dev.jsonl` by default.
 
 Each run also writes `logs/run-report.json`, a structured summary containing the
 run status, chosen agent, branches, PR URL, dirty-file records, per-phase
@@ -315,6 +452,38 @@ read/write permissions. Exception logs include extended tracebacks. When
 OpenTelemetry is installed, log records include the active trace ID, span ID,
 sampled flag, and service name; otherwise those fields are present with default
 zero or empty values.
+
+## Troubleshooting & FAQ
+
+**Preflight fails with a missing command.** The named CLI is not on `PATH`.
+Install it (see [Prerequisites](#prerequisites)) or, if you don't use it, remove
+the corresponding agent from `[workflow]`. Only the CLIs for configured adapters
+are checked.
+
+**Preflight fails on `gh auth status`.** Authenticate the GitHub CLI with
+`gh auth login` (or set `GH_TOKEN`) before running.
+
+**"Plan drift" failure.** The source plan was edited after a run started, so it no
+longer matches the copy stored in the wiki or an implementation clone. The plan
+is immutable for resume — start over with a new plan filename/slug, or reset the
+generated repositories and wiki artifacts. See [Auto-Resume](#auto-resume).
+
+**The run exited while waiting for acceptance.** That's fine. Edit the acceptance
+checkbox in the wiki, then rerun `diamond-dev my-plan.md`; it auto-resumes and
+picks up your choice.
+
+**A run finished with `succeeded_with_warnings`.** One or more best-effort phases
+(such as a notification or an optional test command) were skipped or failed but
+did not block the workflow. The specific warnings are listed in
+`logs/run-report.json` and the PR body.
+
+**A PR already exists for the selected branch.** Auto-resume fails before PR
+creation if any PR (open, closed, or merged) already exists for the accepted
+branch. Resolve or rename the branch, or start a new plan slug.
+
+**Where are the artifacts?** Comparison bundle, comparison page, review file, and
+review-judgment sidecar are written in the invocation directory and pushed to the
+GitHub wiki. Per-run logs and `run-report.json` are under `logs/`.
 
 ## License
 
