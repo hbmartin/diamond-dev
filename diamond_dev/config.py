@@ -21,6 +21,9 @@ from diamond_dev.naming import is_git_remote_url
 CONFIG_FILE_NAME: Final = ".diamond-dev.toml"
 _AGENT_NAME_PATTERN: Final = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DEFAULT_IMPLEMENTERS: Final = ("codex", "claude")
+DEFAULT_COMPARISON_MAX_TOTAL_DIFF_BYTES: Final = 200_000
+DEFAULT_COMPARISON_MAX_FILE_DIFF_BYTES: Final = 40_000
+DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES: Final = 20_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +146,16 @@ class WorkflowConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonConfig:
+    """Comparison bundle generation settings."""
+
+    test_commands: tuple[str, ...] = ()
+    max_total_diff_bytes: int = DEFAULT_COMPARISON_MAX_TOTAL_DIFF_BYTES
+    max_file_diff_bytes: int = DEFAULT_COMPARISON_MAX_FILE_DIFF_BYTES
+    max_test_output_bytes: int = DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES
+
+
+@dataclass(frozen=True, slots=True)
 class _TableLegacyAlias:
     """Mapping between a table key and its legacy top-level alias."""
 
@@ -192,6 +205,7 @@ class DiamondDevConfig:
     prompts: PromptConfig = PromptConfig()
     agents: AgentConfigs = field(default_factory=AgentConfigs)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
+    comparison: ComparisonConfig = ComparisonConfig()
 
     @property
     def config_dir(self) -> Path:
@@ -279,6 +293,7 @@ def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
         prompts=prompts,
         agents=agents,
         workflow=workflow,
+        comparison=_load_comparison(raw_config, resolved_config_path),
     )
 
 
@@ -603,6 +618,32 @@ def _load_workflow(raw_config: dict[str, Any], config_path: Path) -> WorkflowCon
     )
 
 
+def _load_comparison(raw_config: dict[str, Any], config_path: Path) -> ComparisonConfig:
+    comparison = _optional_table(raw_config, "comparison", config_path)
+    return ComparisonConfig(
+        test_commands=_optional_string_sequence(
+            comparison,
+            "test_commands",
+            "`comparison.test_commands`",
+        ) or (),
+        max_total_diff_bytes=_optional_positive_int(
+            comparison,
+            "max_total_diff_bytes",
+            "`comparison.max_total_diff_bytes`",
+        ) or DEFAULT_COMPARISON_MAX_TOTAL_DIFF_BYTES,
+        max_file_diff_bytes=_optional_positive_int(
+            comparison,
+            "max_file_diff_bytes",
+            "`comparison.max_file_diff_bytes`",
+        ) or DEFAULT_COMPARISON_MAX_FILE_DIFF_BYTES,
+        max_test_output_bytes=_optional_positive_int(
+            comparison,
+            "max_test_output_bytes",
+            "`comparison.max_test_output_bytes`",
+        ) or DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES,
+    )
+
+
 def _load_agents(raw_config: dict[str, Any], config_path: Path) -> AgentConfigs:
     raw_agents = _optional_table(raw_config, "agents", config_path)
     agent_configs: dict[str, AgentConfig] = {}
@@ -655,6 +696,19 @@ def _optional_string_sequence(
             )
         strings.append(item.strip())
     return tuple(strings)
+
+
+def _optional_positive_int(
+    raw_config: dict[str, Any],
+    key: str,
+    label: str,
+) -> int | None:
+    value = raw_config.get(key)
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    raise ConfigError(f"Optional config key {label} must be a positive integer")
 
 
 def _optional_agent_name(

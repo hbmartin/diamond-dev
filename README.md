@@ -67,6 +67,12 @@ review_judge = "codex"
 review_fixer = "codex"
 final_reviewer = "claude"
 
+[comparison]
+test_commands = []
+max_total_diff_bytes = 200000
+max_file_diff_bytes = 40000
+max_test_output_bytes = 20000
+
 [agents.codex]
 model = "gpt-5"
 
@@ -93,6 +99,14 @@ Agent table names are workflow-local agent names. Built-in names such as
 Additional agent names must set `adapter` to one of those built-ins, which lets a
 workflow use the same CLI in multiple roles with different models.
 
+The `[comparison]` table controls the deterministic comparison bundle generated
+before the comparison judge runs. `test_commands` defaults to empty, which
+records `tests: not_run` for each implementation branch. When set, commands run
+with `sh -lc` in each implementation clone; nonzero exits are recorded in the
+bundle and the workflow still continues to comparison judgment. Test commands
+are trusted project-specific commands. If they leave uncommitted files,
+`diamond-dev` records those dirty files but does not clean them.
+
 Notification URLs are best-effort GET requests. Failures are logged but do not
 stop the workflow.
 
@@ -114,9 +128,10 @@ Built-in prompt sources:
 - [Comparison follow-up prompt](diamond_dev/commands.py): asks the configured
   comparison fixer to apply requested follow-up changes from the comparison.
 - [Review judgment prompt](diamond_dev/commands.py): asks the configured review
-  judge to classify review findings.
+  judge to classify review findings and write `<slug>-review-judgments.json`.
 - [Review fix prompt](diamond_dev/commands.py): asks the configured review fixer
-  to implement accepted review fixes.
+  to implement accepted review fixes, preferring the JSON sidecar when valid and
+  falling back to legacy markdown judgments when it is absent or malformed.
 - [Comparison judgment prompt wrapper](diamond_dev/commands.py): adds required
   branch, repository, and output-file context to the comparison judge prompt.
 - [Fallback comparison judgment prompt](diamond_dev/commands.py): used when
@@ -182,8 +197,12 @@ Artifact resume rules:
 - If the wiki comparison page exists, it overwrites local `comparison.md`.
 - If only local `comparison.md` exists, it is promoted to the wiki with the
   acceptance checkbox added when missing.
+- The comparison bundle is reused or promoted alongside the comparison page when
+  present.
 - If only a local review file exists, it is promoted to the wiki.
 - If local and wiki review files both exist and differ, the run fails.
+- A valid local review judgment sidecar and valid wiki sidecar must match after
+  canonical JSON parsing. Missing or malformed sidecars are logged and ignored.
 - Existing review files do not skip the configured review fixer; fixes rerun
   when resume reaches the review phase.
 - Existing PRs for the selected branch, open, closed, or merged, fail before PR
@@ -192,9 +211,14 @@ Artifact resume rules:
 
 ## Acceptance
 
-The configured comparison judge must write `comparison.md` in the invocation
-directory. The command then appends this default line and pushes the file to the
-GitHub Gollum wiki as `<slug>-comparison.md`:
+Before comparison judgment, `diamond-dev` writes
+`<slug>-comparison-bundle.md` in the invocation directory and wiki. The bundle
+includes branch metadata, changed-file stats, capped file lists and diffs,
+configured comparison test results, command log paths, and explicit omitted-file
+lists. The configured comparison judge must read that bundle and write
+`comparison.md` in the invocation directory. The command then appends this
+default line and pushes the file to the GitHub Gollum wiki as
+`<slug>-comparison.md`:
 
 ```markdown
 - [ ] Accept: (codex/claude)
@@ -213,6 +237,13 @@ implementer names, for example `- [ ] Accept: (codex/claude/aider)`.
 Malformed acceptance markers fail immediately. The command checks once
 immediately, then waits 2 minutes, then retries with waits of 3 through 12
 minutes.
+
+Review judgment creates a machine-readable sidecar named
+`<slug>-review-judgments.json` with `schema_version`, `review_file`,
+`review_provider`, `review_judge`, and per-finding `id`, `decision`,
+`confidence`, and `rationale`. Valid sidecars are rendered into a deterministic
+`Structured review judgments` section in `<slug>-review.md`; the PR body only
+includes compact decision counts and any `needs_input` IDs.
 
 ## External CLIs
 
@@ -249,8 +280,10 @@ Logs are written to stderr, `logs/diamond-dev.log`, and
 Each run also writes `logs/run-report.json`, a structured summary containing the
 run status, chosen agent, branches, PR URL, dirty-file records, per-phase
 timings, non-fatal phase warnings, preflight details, and per-step command log
-paths. Runs that finish after skipped or failed best-effort phases report
-`succeeded_with_warnings` and include those warnings in the PR body.
+paths. The report includes comparison bundle and review judgment sidecar paths,
+plus the sidecar parse status. Runs that finish after skipped or failed
+best-effort phases report `succeeded_with_warnings` and include those warnings
+in the PR body.
 
 Configure logging with environment variables:
 

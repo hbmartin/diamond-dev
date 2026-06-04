@@ -23,15 +23,13 @@ from diamond_dev.agents import AgentAdapter, AgentCapability, resolve_adapter
 from diamond_dev.commands import (
     ComparisonBranchContext,
     ComparisonPromptContext,
-    build_gh_pr_create_command,
-    build_gh_pr_edit_body_command,
-    build_gh_pr_list_command,
     comparison_implementation_prompt,
     gemini_comparison_prompt,
     initial_implementation_prompt,
     review_fix_prompt,
     review_judgment_prompt,
 )
+from diamond_dev.comparison_bundle import write_comparison_bundle
 from diamond_dev.config import (
     load_config,
     read_comparison_judgment_prompt,
@@ -49,6 +47,7 @@ from diamond_dev.markdown import read_normalized_markdown
 from diamond_dev.notify import notify_url
 from diamond_dev.orchestrator_repositories import RepositoryPreparationMixin
 from diamond_dev.preflight import PreflightSummary, run_preflight
+from diamond_dev.providers import GitHubWorkflowProvider, ReviewProvider
 from diamond_dev.report import (
     PhaseTiming,
     PhaseWarning,
@@ -57,6 +56,14 @@ from diamond_dev.report import (
     RunReportWorkflow,
     RunStatus,
     write_run_report,
+)
+from diamond_dev.review_judgments import (
+    ReviewJudgmentStatus,
+    canonical_review_judgments_json,
+    canonical_review_judgments_payload,
+    read_review_judgments_status,
+    summarize_review_judgments,
+    upsert_structured_judgments_section,
 )
 
 if TYPE_CHECKING:
@@ -72,13 +79,15 @@ T = TypeVar("T")
 class DiamondDevOrchestrator(RepositoryPreparationMixin):
     """Coordinate the full Diamond Dev multi-agent workflow."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         cwd: Path | None = None,
         config_path: Path | None = None,
         report_path: Path | None = None,
         runner: CommandRunner | None = None,
+        workflow_provider: GitHubWorkflowProvider | None = None,
+        review_provider: ReviewProvider | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """Create an orchestrator."""
@@ -86,6 +95,11 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         self.config_path = config_path
         self.runner = runner or CommandRunner(self.cwd / "logs")
         self.git = GitOperations(self.runner)
+        self.workflow_provider = workflow_provider or GitHubWorkflowProvider(
+            runner=self.runner,
+            git=self.git,
+        )
+        self.review_provider = review_provider or ReviewProvider(runner=self.runner)
         self.report_path = report_path or _default_report_path(self.runner, self.cwd)
         self.sleep = sleep
 
@@ -151,11 +165,12 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 lambda: self._run_initial_agents(active_context),
             )
             context = active_context
-            self._timed_phase(
+            active_context = self._timed_phase(
                 phase_timings,
                 "prepare comparison",
                 lambda: self._run_comparison_judgment(active_context),
             )
+            context = active_context
             accepted_agent = self._timed_phase(
                 phase_timings,
                 "poll acceptance",
@@ -387,60 +402,93 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             return
         shutil.copy2(context.plan.path, repo_plan)
 
-    def _run_comparison_judgment(self, context: RunContext) -> None:
-        self.git.sync_wiki(context.wiki.directory)
+    def _run_comparison_judgment(self, context: RunContext) -> RunContext:
+        self.workflow_provider.sync_wiki(context.wiki.directory)
         if context.wiki.comparison_file.is_file():
             shutil.copy2(context.wiki.comparison_file, context.comparison_file)
+            if context.wiki.comparison_bundle_file.is_file():
+                shutil.copy2(
+                    context.wiki.comparison_bundle_file,
+                    context.comparison_bundle_file,
+                )
             logger.info(
                 "Using existing wiki comparison: {}",
                 context.wiki.comparison_file,
             )
-            return
+            return context
 
         if context.comparison_file.is_file():
             self._promote_local_comparison(context)
             notify_url(context.config.notifications.comparison_url, label="comparison")
-            return
+            return context
 
+        active_context = self._prepare_comparison_bundle(context)
         configured_prompt = read_comparison_judgment_prompt(context.config)
         prompt = gemini_comparison_prompt(
             configured_prompt,
             ComparisonPromptContext(
-                base_branch=context.implementation.base_branch,
+                base_branch=active_context.implementation.base_branch,
+                comparison_bundle_file_name=active_context.plan.comparison_bundle_file_name,
                 branches=tuple(
                     ComparisonBranchContext(
                         agent_name=branch.agent_name,
                         branch=branch.branch,
                         repo_dir=branch.repo_dir,
                     )
-                    for branch in context.implementation.branches
+                    for branch in active_context.implementation.branches
                 ),
             ),
         )
-        comparison_judge = context.config.workflow.comparison_judge
+        comparison_judge = active_context.config.workflow.comparison_judge
         log_name = f"{comparison_judge}-comparison"
         self.runner.run(
             _prompt_agent_command(
-                context,
+                active_context,
                 comparison_judge,
-                context.cwd,
+                active_context.cwd,
                 prompt,
                 capability="comparison_judge",
             ),
-            cwd=context.cwd,
+            cwd=active_context.cwd,
             log_name=log_name,
         )
-        if not context.comparison_file.is_file():
+        if not active_context.comparison_file.is_file():
             raise DiamondDevError(
                 f"Comparison judge {comparison_judge} did not write comparison.md",
             )
 
-        self._promote_local_comparison(context)
-        notify_url(context.config.notifications.comparison_url, label="comparison")
+        self._promote_local_comparison(active_context)
+        notify_url(
+            active_context.config.notifications.comparison_url,
+            label="comparison",
+        )
+        return active_context
 
-    def _run_gemini_comparison(self, context: RunContext) -> None:
+    def _run_gemini_comparison(self, context: RunContext) -> RunContext:
         """Run the configured comparison judgment phase."""
-        self._run_comparison_judgment(context)
+        return self._run_comparison_judgment(context)
+
+    def _prepare_comparison_bundle(self, context: RunContext) -> RunContext:
+        active_context = write_comparison_bundle(
+            context=context,
+            runner=self.runner,
+            git=self.git,
+        )
+        shutil.copy2(
+            active_context.comparison_bundle_file,
+            active_context.wiki.comparison_bundle_file,
+        )
+        self.git.commit_if_changes(
+            active_context.wiki.directory,
+            message=f"Add {active_context.plan.slug} comparison bundle",
+            log_prefix="wiki-comparison-bundle",
+            paths=(active_context.wiki.comparison_bundle_file.name,),
+        )
+        self.workflow_provider.push_wiki(
+            active_context.wiki.directory,
+            log_name="wiki-comparison-bundle-push",
+        )
+        return active_context
 
     def _promote_local_comparison(self, context: RunContext) -> None:
         comparison_markdown = context.comparison_file.read_text(encoding="utf-8")
@@ -452,15 +500,21 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             encoding="utf-8",
         )
         shutil.copy2(context.comparison_file, context.wiki.comparison_file)
+        paths = [context.wiki.comparison_file.name]
+        if context.comparison_bundle_file.is_file():
+            shutil.copy2(
+                context.comparison_bundle_file,
+                context.wiki.comparison_bundle_file,
+            )
+            paths.append(context.wiki.comparison_bundle_file.name)
         self.git.commit_if_changes(
             context.wiki.directory,
             message=f"Add {context.plan.slug} comparison",
             log_prefix="wiki-comparison",
-            paths=(context.wiki.comparison_file.name,),
+            paths=tuple(paths),
         )
-        self.git.run(
+        self.workflow_provider.push_wiki(
             context.wiki.directory,
-            "push",
             log_name="wiki-comparison-push",
         )
 
@@ -484,7 +538,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         raise DiamondDevError("No valid acceptance found after polling window")
 
     def _check_acceptance_once(self, context: RunContext) -> str | None:
-        self.git.sync_wiki(context.wiki.directory)
+        self.workflow_provider.sync_wiki(context.wiki.directory)
         if not context.wiki.comparison_file.is_file():
             logger.warning(
                 "Comparison file {} not found in wiki repository",
@@ -508,7 +562,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         selected: SelectedImplementation,
         phase_warnings: list[PhaseWarning],
     ) -> RunContext:
-        self.git.sync_wiki(context.wiki.directory)
+        self.workflow_provider.sync_wiki(context.wiki.directory)
         if context.wiki.review_file.is_file():
             logger.info(
                 "Skipping comparison implementation because wiki review exists: {}",
@@ -607,7 +661,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         selected: SelectedImplementation,
         phase_warnings: list[PhaseWarning],
     ) -> None:
-        self.git.sync_wiki(context.wiki.directory)
+        self.workflow_provider.sync_wiki(context.wiki.directory)
         review_file = selected.repo_dir / context.plan.review_file_name
         if context.wiki.review_file.is_file():
             self._restore_or_validate_review_file(context, review_file)
@@ -625,9 +679,9 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         review_fixer_label = _agent_label(context.config.workflow.review_fixer)
         review_provider_log_name = f"{review_provider}-review"
         try:
-            self.runner.run_to_file(
+            self.review_provider.run_review(
                 _review_provider_command(context),
-                cwd=selected.repo_dir,
+                repo_dir=selected.repo_dir,
                 log_name=review_provider_log_name,
                 output_path=review_file,
             )
@@ -686,6 +740,9 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 repo_dir=selected.repo_dir,
                 prompt=review_judgment_prompt(
                     context.plan.review_file_name,
+                    context.plan.review_judgments_file_name,
+                    context.config.workflow.review_provider,
+                    context.config.workflow.review_judge,
                     configured_judgment_prompt,
                 ),
                 log_name=judgment_log_name,
@@ -738,12 +795,53 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                     "Local review file differs from wiki review file: "
                     f"{review_file}",
                 )
+            self._restore_or_validate_review_judgments(
+                context,
+                review_file.parent / context.plan.review_judgments_file_name,
+            )
             return
         shutil.copy2(context.wiki.review_file, review_file)
+        self._restore_or_validate_review_judgments(
+            context,
+            review_file.parent / context.plan.review_judgments_file_name,
+        )
 
     def _promote_review_file(self, context: RunContext, review_file: Path) -> None:
         review_markdown = review_file.read_text(encoding="utf-8")
-        if "(C)" in review_markdown:
+        review_judgments_file = (
+            review_file.parent / context.plan.review_judgments_file_name
+        )
+        judgment_status = read_review_judgments_status(review_judgments_file)
+        needs_input_from_sidecar = False
+        paths = [context.wiki.review_file.name]
+        if judgment_status.status == "valid" and judgment_status.judgments is not None:
+            review_markdown = upsert_structured_judgments_section(
+                review_markdown,
+                judgment_status.judgments,
+            )
+            review_file.write_text(review_markdown, encoding="utf-8")
+            review_judgments_file.write_text(
+                canonical_review_judgments_json(judgment_status.judgments),
+                encoding="utf-8",
+            )
+            shutil.copy2(review_judgments_file, context.wiki.review_judgments_file)
+            paths.append(context.wiki.review_judgments_file.name)
+            needs_input_from_sidecar = (
+                summarize_review_judgments(judgment_status.judgments).needs_input > 0
+            )
+        elif judgment_status.status == "invalid":
+            logger.warning(
+                "Ignoring invalid structured review judgment sidecar {}: {}",
+                judgment_status.path,
+                judgment_status.error,
+            )
+        else:
+            logger.warning(
+                "Structured review judgment sidecar missing: {}",
+                judgment_status.path,
+            )
+
+        if "(C)" in review_markdown or needs_input_from_sidecar:
             notify_url(
                 context.config.notifications.review_input_needed_url,
                 label="review input needed",
@@ -754,9 +852,43 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             context.wiki.directory,
             message=f"Add {context.plan.slug} review",
             log_prefix="wiki-review",
-            paths=(context.wiki.review_file.name,),
+            paths=tuple(paths),
         )
-        self.git.run(context.wiki.directory, "push", log_name="wiki-review-push")
+        self.workflow_provider.push_wiki(
+            context.wiki.directory,
+            log_name="wiki-review-push",
+        )
+
+    def _restore_or_validate_review_judgments(
+        self,
+        context: RunContext,
+        local_review_judgments_file: Path,
+    ) -> None:
+        wiki_status = read_review_judgments_status(context.wiki.review_judgments_file)
+        local_status = read_review_judgments_status(local_review_judgments_file)
+        if wiki_status.status == "valid" and wiki_status.judgments is not None:
+            if _valid_review_judgments_differ(local_status, wiki_status):
+                raise DiamondDevError(
+                    "Local review judgment sidecar differs from wiki review "
+                    f"judgment sidecar: {local_review_judgments_file}",
+                )
+            shutil.copy2(
+                context.wiki.review_judgments_file,
+                local_review_judgments_file,
+            )
+            return
+        if wiki_status.status == "invalid":
+            logger.warning(
+                "Ignoring invalid wiki review judgment sidecar {}: {}",
+                wiki_status.path,
+                wiki_status.error,
+            )
+        if local_status.status == "invalid":
+            logger.warning(
+                "Ignoring invalid local review judgment sidecar {}: {}",
+                local_status.path,
+                local_status.error,
+            )
 
     def _run_review_fixes(
         self,
@@ -779,6 +911,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 repo_dir=selected.repo_dir,
                 prompt=review_fix_prompt(
                     context.plan.review_file_name,
+                    context.plan.review_judgments_file_name,
                     configured_prompt,
                 ),
                 log_name=log_name,
@@ -812,7 +945,9 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         for artifact_name in (
             context.plan.file_name,
             context.plan.comparison_file_name,
+            context.plan.comparison_bundle_file_name,
             context.plan.review_file_name,
+            context.plan.review_judgments_file_name,
         ):
             (selected.repo_dir / artifact_name).unlink(missing_ok=True)
 
@@ -823,7 +958,9 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             paths=(
                 context.plan.file_name,
                 context.plan.comparison_file_name,
+                context.plan.comparison_bundle_file_name,
                 context.plan.review_file_name,
+                context.plan.review_judgments_file_name,
             ),
         )
         context = self.git.record_dirty_files(
@@ -841,18 +978,14 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
 
         pr_title = f"Implement {context.plan.path.stem}"
         pr_body = pr.build_pr_body(context, selected, warnings=phase_warnings)
-        pr_result = self.runner.run(
-            build_gh_pr_create_command(
-                base_branch=context.implementation.base_branch,
-                head_branch=selected.branch,
-                title=pr_title,
-                body=pr_body,
-            ),
-            cwd=selected.repo_dir,
-            log_name="gh-pr-create",
+        created_pr = self.workflow_provider.create_pull_request(
+            selected,
+            base_branch=context.implementation.base_branch,
+            title=pr_title,
+            body=pr_body,
         )
-        pr_url = pr.parse_pr_url(pr_result.output)
-        pr_number = pr.parse_pr_number(pr_result.output)
+        pr_url = created_pr.url
+        pr_number = created_pr.number
         notify_url(context.config.notifications.open_pr_url, label="open pr")
         context = context.with_pr_url(pr_url)
 
@@ -886,17 +1019,14 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 ),
             )
             try:
-                self.runner.run(
-                    build_gh_pr_edit_body_command(
-                        pr_url=pr_url,
-                        body=pr.build_pr_body(
-                            context,
-                            selected,
-                            warnings=phase_warnings,
-                        ),
+                self.workflow_provider.edit_pull_request_body(
+                    selected.repo_dir,
+                    pr_url=pr_url,
+                    body=pr.build_pr_body(
+                        context,
+                        selected,
+                        warnings=phase_warnings,
                     ),
-                    cwd=selected.repo_dir,
-                    log_name="gh-pr-edit-final-review-warning",
                 )
             except (CommandFailureError,) as edit_error:
                 logger.opt(exception=edit_error).warning(
@@ -906,12 +1036,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
         return context
 
     def _ensure_no_existing_pr(self, selected: SelectedImplementation) -> None:
-        result = self.runner.run(
-            build_gh_pr_list_command(selected.branch),
-            cwd=selected.repo_dir,
-            log_name="gh-pr-list-existing",
-        )
-        if existing_pr := pr.parse_existing_pull_request(result.output):
+        if existing_pr := self.workflow_provider.existing_pull_request(selected):
             raise DiamondDevError(
                 "Pull request already exists for selected branch "
                 f"{selected.branch}: #{existing_pr.number} {existing_pr.state} "
@@ -1006,6 +1131,22 @@ def _agent_label(agent_name: str) -> str:
         "coderabbit": "CodeRabbit",
         "gemini": "Gemini",
     }.get(agent_name, agent_name)
+
+
+def _valid_review_judgments_differ(
+    local_status: ReviewJudgmentStatus,
+    wiki_status: ReviewJudgmentStatus,
+) -> bool:
+    if (
+        local_status.status != "valid"
+        or local_status.judgments is None
+        or wiki_status.status != "valid"
+        or wiki_status.judgments is None
+    ):
+        return False
+    return canonical_review_judgments_payload(
+        local_status.judgments,
+    ) != canonical_review_judgments_payload(wiki_status.judgments)
 
 
 def _default_report_path(runner: object, cwd: Path) -> Path:

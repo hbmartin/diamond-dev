@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
+from diamond_dev.review_judgments import read_review_judgments_status
+
 if TYPE_CHECKING:
     from diamond_dev.executor import CommandLogRecord
     from diamond_dev.preflight import PreflightSummary
@@ -115,7 +117,10 @@ def _context_payload(context: RunContext | None) -> dict[str, object] | None:
         "workflow_roles": _workflow_roles_payload(context),
         "artifacts": {
             "comparison": str(context.wiki.comparison_file),
+            "comparison_bundle": str(context.wiki.comparison_bundle_file),
             "review": str(context.wiki.review_file),
+            "review_judgments": str(context.wiki.review_judgments_file),
+            "review_judgments_parse_status": _review_judgments_parse_status(context),
             "pr_url": context.pr_url,
         },
         "dirty_records": [
@@ -178,6 +183,15 @@ def _preflight_payload(
             for cli_check in preflight_summary.cli_checks
         ],
         "gh_auth_log_path": str(preflight_summary.gh_auth_log_path),
+    }
+
+
+def _review_judgments_parse_status(context: RunContext) -> dict[str, object]:
+    status = read_review_judgments_status(context.wiki.review_judgments_file)
+    return {
+        "status": status.status,
+        "path": str(status.path),
+        "error": status.error,
     }
 
 

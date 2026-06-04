@@ -172,10 +172,23 @@ class _ScriptedRunner(CommandRunner):
                 (target_path / ".git").mkdir(exist_ok=True)
             case ("git", "symbolic-ref", *_):
                 output = "origin/main\n"
+            case ("git", "rev-parse", *_):
+                output = "abc123\n"
             case ("git", "ls-remote", *_):
                 returncode = 2
             case ("git", "rev-list", "--left-right", "--count", *_):
                 output = "0\t0\n"
+            case ("git", "diff", "--name-status", *_):
+                output = "M\tsrc/app.py\n"
+            case ("git", "diff", "--no-color", *_):
+                output = (
+                    "diff --git a/src/app.py b/src/app.py\n"
+                    "--- a/src/app.py\n"
+                    "+++ b/src/app.py\n"
+                    "@@ -1 +1 @@\n"
+                    "-old\n"
+                    "+new\n"
+                )
             case ("git", "diff", "--cached", *_):
                 returncode = 1
             case ("git", "status", "--porcelain"):
@@ -418,7 +431,13 @@ def build_context(tmp_path: Path) -> RunContext:
             url="git@github.com:owner/repo.wiki.git",
             directory=tmp_path / "repo.wiki",
             comparison_file=tmp_path / "repo.wiki" / "my-plan-comparison.md",
+            comparison_bundle_file=(
+                tmp_path / "repo.wiki" / "my-plan-comparison-bundle.md"
+            ),
             review_file=tmp_path / "repo.wiki" / "my-plan-review.md",
+            review_judgments_file=(
+                tmp_path / "repo.wiki" / "my-plan-review-judgments.json"
+            ),
         ),
         implementation=ImplementationContext(
             branches=(
@@ -1392,6 +1411,101 @@ def test_restore_or_validate_review_file_accepts_line_ending_differences(
     assert review_file.read_bytes() == local_review_bytes
 
 
+def test_restore_or_validate_review_file_restores_wiki_sidecar(
+    tmp_path: Path,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    context.wiki.review_file.write_text("Review\n", encoding="utf-8")
+    context.wiki.review_judgments_file.write_text(
+        _review_judgments_text(decision="fix"),
+        encoding="utf-8",
+    )
+    review_file = selected_repo / context.plan.review_file_name
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    orchestrator._restore_or_validate_review_file(context, review_file)  # noqa: SLF001
+
+    assert review_file.read_text(encoding="utf-8") == "Review\n"
+    assert (
+        selected_repo / context.plan.review_judgments_file_name
+    ).read_text(encoding="utf-8") == _review_judgments_text(decision="fix")
+
+
+def test_restore_or_validate_review_file_fails_on_sidecar_conflict(
+    tmp_path: Path,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    context.wiki.review_file.write_text("Review\n", encoding="utf-8")
+    context.wiki.review_judgments_file.write_text(
+        _review_judgments_text(decision="fix"),
+        encoding="utf-8",
+    )
+    review_file = selected_repo / context.plan.review_file_name
+    review_file.write_text("Review\n", encoding="utf-8")
+    (selected_repo / context.plan.review_judgments_file_name).write_text(
+        _review_judgments_text(decision="decline"),
+        encoding="utf-8",
+    )
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    with pytest.raises(DiamondDevError, match="judgment sidecar"):
+        orchestrator._restore_or_validate_review_file(context, review_file)  # noqa: SLF001
+
+
+def test_promote_review_file_warns_only_when_sidecar_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    review_file = selected_repo / context.plan.review_file_name
+    review_file.write_text("Review\n", encoding="utf-8")
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.git, "commit_if_changes", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(orchestrator.workflow_provider, "push_wiki", lambda *_args, **_kwargs: None)
+
+    orchestrator._promote_review_file(context, review_file)  # noqa: SLF001
+
+    assert context.wiki.review_file.read_text(encoding="utf-8") == "Review\n"
+    assert not context.wiki.review_judgments_file.exists()
+
+
+def test_promote_review_file_renders_and_copies_valid_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    review_file = selected_repo / context.plan.review_file_name
+    review_file.write_text("Review\n", encoding="utf-8")
+    (selected_repo / context.plan.review_judgments_file_name).write_text(
+        _review_judgments_text(decision="fix"),
+        encoding="utf-8",
+    )
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.git, "commit_if_changes", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(orchestrator.workflow_provider, "push_wiki", lambda *_args, **_kwargs: None)
+
+    orchestrator._promote_review_file(context, review_file)  # noqa: SLF001
+
+    wiki_review = context.wiki.review_file.read_text(encoding="utf-8")
+    assert "## Structured review judgments" in wiki_review
+    assert "| CR-1 | fix | 0.80 | Valid finding. |" in wiki_review
+    assert context.wiki.review_judgments_file.read_text(
+        encoding="utf-8",
+    ) == _canonical_review_judgments_text(decision="fix")
+
+
 @pytest.mark.parametrize("pr_state", ("OPEN", "CLOSED", "MERGED"))
 def test_finalize_pr_fails_when_existing_pr_found(
     tmp_path: Path,
@@ -1580,3 +1694,28 @@ def test_finalize_pr_records_dirty_files_and_still_pushes(
     assert updated_context.pr_url == "https://github.com/owner/repo/pull/123"
     assert ("git", "push", "-u", "origin", "codex/my-plan") in runner.commands
     assert any(command[:3] == ("gh", "pr", "create") for command in runner.commands)
+
+
+def _review_judgments_text(*, decision: str) -> str:
+    return _canonical_review_judgments_text(decision=decision)
+
+
+def _canonical_review_judgments_text(*, decision: str) -> str:
+    return f"{json.dumps(_review_judgments_payload(decision=decision), indent=2, sort_keys=True)}\n"
+
+
+def _review_judgments_payload(*, decision: str) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "review_file": "my-plan-review.md",
+        "review_provider": "coderabbit",
+        "review_judge": "codex",
+        "findings": [
+            {
+                "id": "CR-1",
+                "decision": decision,
+                "confidence": 0.8,
+                "rationale": "Valid finding.",
+            },
+        ],
+    }

@@ -19,6 +19,8 @@ from diamond_dev.commands import (
     build_uv_sync_command,
     gemini_comparison_prompt,
     initial_implementation_prompt,
+    review_fix_prompt,
+    review_judgment_prompt,
 )
 
 
@@ -214,6 +216,42 @@ def test_custom_initial_prompt_keeps_required_context() -> None:
     assert "Do not push" in prompt
 
 
+def test_review_judgment_prompt_requires_structured_sidecar() -> None:
+    prompt = review_judgment_prompt(
+        "my-plan-review.md",
+        "my-plan-review-judgments.json",
+        "coderabbit",
+        "codex",
+        "Custom review judgment rules.",
+    )
+
+    assert "Custom review judgment rules." in prompt
+    assert "my-plan-review.md" in prompt
+    assert "my-plan-review-judgments.json" in prompt
+    assert "`schema_version`" in prompt
+    assert "`review_provider`: `coderabbit`" in prompt
+    assert "`review_judge`: `codex`" in prompt
+    assert "`fix`, `decline`, and `needs_input`" in prompt
+    assert "(A) should fix" in prompt
+    assert "Commit the updated review file and structured judgment sidecar" in prompt
+
+
+def test_review_fix_prompt_prefers_sidecar_and_keeps_legacy_fallback() -> None:
+    prompt = review_fix_prompt(
+        "my-plan-review.md",
+        "my-plan-review-judgments.json",
+        "Custom review fix rules.",
+    )
+
+    assert "Custom review fix rules." in prompt
+    assert "my-plan-review.md" in prompt
+    assert "my-plan-review-judgments.json" in prompt
+    assert "decision `fix`" in prompt
+    assert "sidecar is missing or invalid" in prompt
+    assert "(A) should fix" in prompt
+    assert "decision `decline` or `needs_input`" in prompt
+
+
 def test_gemini_prompt_includes_custom_prompt_and_context(tmp_path: Path) -> None:
     codex_dir = tmp_path / "codex-my-plan"
     claude_dir = tmp_path / "claude-my-plan"
@@ -221,6 +259,7 @@ def test_gemini_prompt_includes_custom_prompt_and_context(tmp_path: Path) -> Non
         "Custom compare rules.",
         ComparisonPromptContext(
             base_branch="main",
+            comparison_bundle_file_name="my-plan-comparison-bundle.md",
             branches=(
                 ComparisonBranchContext(
                     agent_name="codex",
@@ -239,6 +278,7 @@ def test_gemini_prompt_includes_custom_prompt_and_context(tmp_path: Path) -> Non
     assert "Custom compare rules." in prompt
     assert "codex/my-plan" in prompt
     assert "claude/my-plan" in prompt
+    assert "my-plan-comparison-bundle.md" in prompt
     assert "comparison.md" in prompt
 
 
@@ -249,6 +289,7 @@ def test_gemini_prompt_uses_fallback_for_whitespace_prompt(
         "   ",
         ComparisonPromptContext(
             base_branch="main",
+            comparison_bundle_file_name="my-plan-comparison-bundle.md",
             branches=(
                 ComparisonBranchContext(
                     agent_name="codex",
