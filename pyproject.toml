@@ -4,13 +4,31 @@ version = "0.1.0"
 description = "Coordinate multi-agent implementation workflows from markdown plans."
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.14"
 authors = [
     { name = "Harold Martin", email = "harold.martin@gmail.com" },
 ]
+keywords = ["ai-agents", "automation", "cli", "code-review", "workflow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
+]
 dependencies = [
     "loguru>=0.7.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/hbmartin/diamond-dev"
+Issues = "https://github.com/hbmartin/diamond-dev/issues"
+Repository = "https://github.com/hbmartin/diamond-dev"
 
 [project.scripts]
 diamond-dev = "diamond_dev.main:main"
@@ -34,6 +52,7 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = ""
+source-exclude = ["**/.DS_Store"]
 wheel-exclude = ["**/.mypy_cache", "**/.DS_Store"]
 
 [tool.ruff]
