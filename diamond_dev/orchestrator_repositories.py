@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from diamond_dev.acceptance import AgentChoice
     from diamond_dev.executor import CommandRunner
     from diamond_dev.git_ops import GitOperations
-    from diamond_dev.workflow import RunContext
+    from diamond_dev.workflow import ImplementationContext, RunContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,9 +121,8 @@ class RepositoryPreparationMixin:
             cwd=context.cwd,
             log_name="codex-clone",
         )
-        implementation = implementation.with_base_branch(
-            self.git.remote_default_branch(implementation.codex_dir),
-        )
+        context = self._with_remote_base_branch(context)
+        implementation = context.implementation
         self.runner.run(
             (
                 "git",
@@ -146,26 +145,34 @@ class RepositoryPreparationMixin:
             base_branch=implementation.base_branch,
             log_prefix="claude",
         )
-        self._install_packages(implementation.codex_dir, log_prefix="codex")
-        self._install_packages(implementation.claude_dir, log_prefix="claude")
+        self._install_implementation_packages(implementation)
 
         for repo_dir in (
             implementation.codex_dir,
             implementation.claude_dir,
         ):
             shutil.copy2(context.plan.path, repo_dir / context.plan.file_name)
-        return context.with_implementation(implementation)
+        return context
 
     def _resume_implementation_clones(self, context: RunContext) -> RunContext:
-        implementation = context.implementation
         for agent_branch in _resume_agent_branches(context):
             self._validate_resume_clone(context, agent_branch)
-        implementation = implementation.with_base_branch(
-            self.git.remote_default_branch(implementation.codex_dir),
+        context = self._with_remote_base_branch(context)
+        self._install_implementation_packages(context.implementation)
+        return context
+
+    def _with_remote_base_branch(self, context: RunContext) -> RunContext:
+        implementation = context.implementation.with_base_branch(
+            self.git.remote_default_branch(context.implementation.codex_dir),
         )
+        return context.with_implementation(implementation)
+
+    def _install_implementation_packages(
+        self,
+        implementation: ImplementationContext,
+    ) -> None:
         self._install_packages(implementation.codex_dir, log_prefix="codex")
         self._install_packages(implementation.claude_dir, log_prefix="claude")
-        return context.with_implementation(implementation)
 
     def _validate_resume_clone(
         self,

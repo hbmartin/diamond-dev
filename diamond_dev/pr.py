@@ -50,26 +50,19 @@ def parse_existing_pull_request(gh_output: str) -> ExistingPullRequest | None:
     except (json.JSONDecodeError,) as error:
         raise DiamondDevError(f"Could not parse PR list JSON: {gh_output}") from error
 
-    if not isinstance(payload, list):
-        raise DiamondDevError(f"Expected PR list JSON array: {gh_output}")
-    if not payload:
-        return None
-
-    first_item = payload[0]
-    if not isinstance(first_item, dict):
-        raise DiamondDevError(f"Expected PR list item object: {gh_output}")
-
-    number = first_item.get("number")
-    state = first_item.get("state")
-    url = first_item.get("url")
-    if not isinstance(number, int) or not isinstance(state, str) or not isinstance(
-        url,
-        str,
-    ):
-        raise DiamondDevError(
-            f"PR list item missing number, state, or url: {gh_output}",
-        )
-    return ExistingPullRequest(number=number, state=state, url=url)
+    match payload:
+        case []:
+            return None
+        case [{"number": int(number), "state": str(state), "url": str(url)}, *_]:
+            return ExistingPullRequest(number=number, state=state, url=url)
+        case [dict(), *_]:
+            raise DiamondDevError(
+                f"PR list item missing number, state, or url: {gh_output}",
+            )
+        case [*_]:
+            raise DiamondDevError(f"Expected PR list item object: {gh_output}")
+        case _:
+            raise DiamondDevError(f"Expected PR list JSON array: {gh_output}")
 
 
 def build_pr_body(

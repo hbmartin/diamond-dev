@@ -323,6 +323,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 label=f"{agent_branch.agent} initial",
                 repo_dir=agent_branch.repo_dir,
                 branch=agent_branch.branch,
+                log_prefix=f"{agent_branch.log_prefix}-initial",
             )
         notify_url(
             context.config.notifications.initial_implementation_url,
@@ -364,11 +365,12 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 f"{agent_branch.agent} initial",
                 agent_branch.repo_dir,
                 agent_branch.branch,
+                log_prefix=f"{agent_branch.log_prefix}-initial",
             )
             self.git.push_branch(
                 agent_branch.repo_dir,
                 agent_branch.branch,
-                log_name=f"{agent_branch.agent} initial-push",
+                log_name=f"{agent_branch.log_prefix}-initial-push",
             )
             return False, updated_context, True
 
@@ -546,6 +548,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             label=f"{selected.opposite_agent} comparison",
             repo_dir=selected.repo_dir,
             branch=selected.branch,
+            log_prefix=f"{selected.opposite_agent}-comparison",
         )
 
         comparison_file.unlink(missing_ok=True)
@@ -650,15 +653,27 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 "Codex review judgment failed; continuing: {}",
                 error,
             )
-            phase_warnings.append(
-                PhaseWarning(
-                    phase="Codex review judgment",
-                    status="failed",
-                    message="Codex failed while judging CodeRabbit review findings.",
-                    error=str(error),
-                    log_name=judgment_log_name,
+            phase_warnings.extend(
+                (
+                    PhaseWarning(
+                        phase="Codex review judgment",
+                        status="failed",
+                        message=(
+                            "Codex failed while judging CodeRabbit review findings."
+                        ),
+                        error=str(error),
+                        log_name=judgment_log_name,
+                    ),
+                    PhaseWarning(
+                        phase="Codex review fixes",
+                        status="skipped",
+                        message="Skipped because Codex review judgment failed.",
+                        error=None,
+                        log_name=None,
+                    ),
                 ),
             )
+            return
 
         self._promote_review_file(context, review_file)
         self._run_review_fixes(context, selected, phase_warnings)
@@ -762,6 +777,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             "final selected branch",
             selected.repo_dir,
             selected.branch,
+            log_prefix="final-selected-branch",
         )
         self.git.push_branch(
             selected.repo_dir,
@@ -810,14 +826,24 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                     log_name=final_review_log_name,
                 ),
             )
-            self.runner.run(
-                build_gh_pr_edit_body_command(
-                    pr_url=pr_url,
-                    body=pr.build_pr_body(context, selected, warnings=phase_warnings),
-                ),
-                cwd=selected.repo_dir,
-                log_name="gh-pr-edit-final-review-warning",
-            )
+            try:
+                self.runner.run(
+                    build_gh_pr_edit_body_command(
+                        pr_url=pr_url,
+                        body=pr.build_pr_body(
+                            context,
+                            selected,
+                            warnings=phase_warnings,
+                        ),
+                    ),
+                    cwd=selected.repo_dir,
+                    log_name="gh-pr-edit-final-review-warning",
+                )
+            except (CommandFailureError,) as edit_error:
+                logger.opt(exception=edit_error).warning(
+                    "Failed to edit PR body with workflow warnings: {}",
+                    edit_error,
+                )
         return context
 
     def _ensure_no_existing_pr(self, selected: SelectedImplementation) -> None:

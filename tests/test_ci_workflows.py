@@ -9,6 +9,7 @@ ACTION_USE_PATTERN = re.compile(r"^\s*uses:\s+(?P<reference>[^#\s]+)")
 FULL_SHA_REFERENCE_PATTERN = re.compile(r".+@[0-9a-f]{40}$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+CI_WORKFLOW = WORKFLOW_DIR / "ci.yml"
 
 
 def _workflow_action_references() -> list[tuple[Path, int, str]]:
@@ -38,3 +39,31 @@ def test_github_actions_are_pinned_to_full_commit_shas() -> None:
     ]
 
     assert mutable_references == []
+
+
+def test_ci_default_permissions_are_read_only() -> None:
+    workflow_text = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "\npermissions:\n  contents: read\n" in workflow_text
+    assert "issues: write" not in workflow_text
+
+
+def test_ci_pr_write_permission_is_isolated_to_pylint_comment_job() -> None:
+    workflow_text = CI_WORKFLOW.read_text(encoding="utf-8")
+    lint_job_start = workflow_text.index("  lint-type-test:")
+    comment_job_start = workflow_text.index("  pylint-pr-comment:")
+    pr_write_index = workflow_text.index("pull-requests: write")
+
+    assert workflow_text.count("pull-requests: write") == 1
+    assert comment_job_start < pr_write_index
+    assert "pull-requests: write" not in workflow_text[
+        lint_job_start:comment_job_start
+    ]
+
+
+def test_ci_pylint_pr_comment_uses_body_file() -> None:
+    workflow_text = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'gh pr comment "${PR_NUMBER}" --body-file pylint-pr-comment.md' in (
+        workflow_text
+    )

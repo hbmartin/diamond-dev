@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -29,6 +30,9 @@ from diamond_dev.workflow import (
     SelectedImplementation,
     WikiContext,
 )
+
+if TYPE_CHECKING:
+    from diamond_dev.orchestrator_repositories import ResumeAgentBranch
 
 
 class _RecordingRunner:
@@ -336,6 +340,64 @@ class _FinalReviewFailureRunner(_RecordingRunner):
             returncode=1,
             log_path=str(cwd / f"{log_name}.log"),
         )
+
+
+class _FinalReviewAndBodyEditFailureRunner(_FinalReviewFailureRunner):
+    """Recording runner that also fails the warning PR body edit."""
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        result = super().run(command, cwd=cwd, log_name=log_name, check=check)
+        if tuple(command)[:3] == ("gh", "pr", "edit"):
+            raise CommandFailureError(
+                command=" ".join(command),
+                cwd=str(cwd),
+                returncode=1,
+                log_path=str(result.log_path),
+            )
+        return result
+
+
+class _ReviewJudgmentFailureRunner(_RecordingRunner):
+    """Recording runner that produces a review then fails judgment."""
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        if log_name == "codex-review-judgment":
+            command_tuple = tuple(command)
+            self.commands.append(command_tuple)
+            self.command_calls.append((command_tuple, cwd, log_name))
+            raise CommandFailureError(
+                command=" ".join(command_tuple),
+                cwd=str(cwd),
+                returncode=1,
+                log_path=str(cwd / f"{log_name}.log"),
+            )
+        return super().run(command, cwd=cwd, log_name=log_name, check=check)
+
+    def run_to_file(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        output_path: Path,
+        check: bool = True,
+    ) -> CommandResult:
+        output_path.write_text("Raw review\n", encoding="utf-8")
+        return self.run(command, cwd=cwd, log_name=log_name, check=check)
 
 
 def build_context(tmp_path: Path) -> RunContext:
@@ -741,6 +803,59 @@ def test_prepare_implementation_clones_installs_both_lockfiles_in_order(
     ]
 
 
+def test_prepare_implementation_clones_resumes_with_shared_install_helper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    context = context.with_implementation(context.implementation.with_base_branch(""))
+    context.implementation.codex_dir.mkdir()
+    context.implementation.claude_dir.mkdir()
+    (context.implementation.codex_dir / "uv.lock").write_text("", encoding="utf-8")
+    (context.implementation.claude_dir / "pnpm-lock.yaml").write_text(
+        "",
+        encoding="utf-8",
+    )
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    validated_branches: list[tuple[Path, str, str]] = []
+
+    def validate_resume_clone(
+        _context: RunContext,
+        agent_branch: ResumeAgentBranch,
+    ) -> None:
+        validated_branches.append(
+            (
+                agent_branch.repo_dir,
+                agent_branch.branch,
+                agent_branch.log_prefix,
+            ),
+        )
+
+    def remote_default_branch(repo_dir: Path) -> str:
+        assert repo_dir == context.implementation.codex_dir
+        return "trunk"
+
+    monkeypatch.setattr(orchestrator, "_validate_resume_clone", validate_resume_clone)
+    monkeypatch.setattr(orchestrator.git, "remote_default_branch", remote_default_branch)
+
+    updated_context = orchestrator._prepare_implementation_clones(context)  # noqa: SLF001
+
+    assert updated_context.implementation.base_branch == "trunk"
+    assert validated_branches == [
+        (context.implementation.codex_dir, "codex/my-plan", "codex"),
+        (context.implementation.claude_dir, "claude/my-plan", "claude"),
+    ]
+    assert _install_calls(runner) == [
+        (("uv", "sync", "--locked"), context.implementation.codex_dir, "codex-uv-sync"),
+        (
+            ("pnpm", "install", "--frozen-lockfile"),
+            context.implementation.claude_dir,
+            "claude-pnpm-install",
+        ),
+    ]
+
+
 def test_prepare_implementation_clones_fails_when_one_clone_missing(
     tmp_path: Path,
 ) -> None:
@@ -824,6 +939,11 @@ def test_run_initial_agents_pushes_local_commits_without_rerun(
 
     assert ("git", "push", "-u", "origin", "codex/my-plan") in runner.commands
     assert ("git", "push", "-u", "origin", "claude/my-plan") in runner.commands
+    assert [
+        log_name
+        for command, _cwd, log_name in runner.command_calls
+        if command[:2] == ("git", "push")
+    ] == ["codex-initial-push", "claude-initial-push"]
     assert not any(command[0] in {"codex", "claude"} for command in runner.commands)
 
 
@@ -1008,6 +1128,86 @@ def test_run_review_phases_promotes_local_review(
     assert fix_calls == [selected_repo]
 
 
+def test_run_review_phases_restores_wiki_review_and_runs_fixes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    context.wiki.review_file.write_text("Wiki Review\n", encoding="utf-8")
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=selected_repo,
+        branch=context.implementation.codex_branch,
+    )
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    fix_calls: list[Path] = []
+    monkeypatch.setattr(orchestrator.git, "sync_wiki", lambda _wiki_dir: None)
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_review_fixes",
+        lambda _context, selected_implementation, _warnings: fix_calls.append(
+            selected_implementation.repo_dir,
+        ),
+    )
+
+    orchestrator._run_review_phases(context, selected, [])  # noqa: SLF001
+
+    assert (selected_repo / context.plan.review_file_name).read_text(
+        encoding="utf-8",
+    ) == "Wiki Review\n"
+    assert fix_calls == [selected_repo]
+
+
+def test_run_review_phases_skips_fixes_when_judgment_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=selected_repo,
+        branch=context.implementation.codex_branch,
+    )
+    runner = _ReviewJudgmentFailureRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    phase_warnings: list[PhaseWarning] = []
+    promoted_reviews: list[Path] = []
+    fix_calls: list[Path] = []
+    monkeypatch.setattr(orchestrator.git, "sync_wiki", lambda _wiki_dir: None)
+    monkeypatch.setattr(
+        orchestrator,
+        "_promote_review_file",
+        lambda _context, review_file: promoted_reviews.append(review_file),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_review_fixes",
+        lambda _context, selected_implementation, _warnings: fix_calls.append(
+            selected_implementation.repo_dir,
+        ),
+    )
+
+    orchestrator._run_review_phases(context, selected, phase_warnings)  # noqa: SLF001
+
+    assert (selected_repo / context.plan.review_file_name).read_text(
+        encoding="utf-8",
+    ) == "Raw review\n"
+    assert promoted_reviews == []
+    assert fix_calls == []
+    assert [(warning.phase, warning.status) for warning in phase_warnings] == [
+        ("Codex review judgment", "failed"),
+        ("Codex review fixes", "skipped"),
+    ]
+
+
 def test_run_review_phases_fails_on_local_wiki_review_diff(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1054,9 +1254,11 @@ def test_restore_or_validate_review_file_accepts_line_ending_differences(
     assert review_file.read_bytes() == local_review_bytes
 
 
+@pytest.mark.parametrize("pr_state", ("OPEN", "CLOSED", "MERGED"))
 def test_finalize_pr_fails_when_existing_pr_found(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    pr_state: str,
 ) -> None:
     context = build_context(tmp_path)
     selected_repo = context.implementation.codex_dir
@@ -1085,7 +1287,7 @@ def test_finalize_pr_fails_when_existing_pr_found(
             returncode=0,
             log_path=cwd / f"{log_name}.log",
             output=(
-                '[{"number": 7, "state": "MERGED", '
+                f'[{{"number": 7, "state": "{pr_state}", '
                 '"url": "https://github.com/owner/repo/pull/7"}]'
             ),
         )
@@ -1128,6 +1330,33 @@ def test_finalize_pr_edits_body_when_final_review_fails(tmp_path: Path) -> None:
     pr_body = pr_edit_command[pr_edit_command.index("--body") + 1]
     assert "Workflow warnings:" in pr_body
     assert "final interactive Claude review (failed)" in pr_body
+
+
+def test_finalize_pr_continues_when_warning_body_edit_fails(tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=selected_repo,
+        branch=context.implementation.codex_branch,
+    )
+    runner = _FinalReviewAndBodyEditFailureRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    phase_warnings: list[PhaseWarning] = []
+
+    updated_context = orchestrator._finalize_pr(  # noqa: SLF001
+        context,
+        selected,
+        phase_warnings,
+    )
+
+    assert updated_context.pr_url == "https://github.com/owner/repo/pull/123"
+    assert [(warning.phase, warning.status) for warning in phase_warnings] == [
+        ("final interactive Claude review", "failed"),
+    ]
+    assert any(command[:3] == ("gh", "pr", "edit") for command in runner.commands)
 
 
 def test_poll_acceptance_skips_missing_wiki_comparison_file(
@@ -1200,7 +1429,7 @@ def test_finalize_pr_records_dirty_files_and_still_pushes(
         return False
 
     def dirty_files(_repo_dir: Path, *, log_name: str) -> tuple[str, ...]:
-        assert log_name == "final selected branch-dirty-status"
+        assert log_name == "final-selected-branch-dirty-status"
         return ("src/dirty.py",)
 
     monkeypatch.setattr(orchestrator.git, "commit_if_changes", no_commit)

@@ -189,7 +189,7 @@ def read_prompt_file(
         raise ConfigError(f"{label} file not found: {prompt_path}")
     try:
         return prompt_path.read_text(encoding="utf-8")
-    except (OSError,) as error:
+    except (OSError, UnicodeDecodeError) as error:
         raise ConfigError(
             f"Could not read {label} file {prompt_path}: {error}",
         ) from error
