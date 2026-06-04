@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,20 +13,13 @@ from diamond_dev.errors import DiamondDevError
 from diamond_dev.markdown import read_normalized_markdown
 
 if TYPE_CHECKING:
-    from diamond_dev.acceptance import AgentChoice
     from diamond_dev.executor import CommandRunner
     from diamond_dev.git_ops import GitOperations
-    from diamond_dev.workflow import ImplementationContext, RunContext
-
-
-@dataclass(frozen=True, slots=True)
-class ResumeAgentBranch:
-    """Resolved repository and branch details for resuming an agent."""
-
-    agent: AgentChoice
-    repo_dir: Path
-    branch: str
-    log_prefix: str
+    from diamond_dev.workflow import (
+        ImplementationBranch,
+        ImplementationContext,
+        RunContext,
+    )
 
 
 class RepositoryPreparationMixin:
@@ -79,13 +71,12 @@ class RepositoryPreparationMixin:
 
     def _prepare_implementation_clones(self, context: RunContext) -> RunContext:
         implementation = context.implementation
-        clone_dirs = (implementation.codex_dir, implementation.claude_dir)
+        clone_dirs = tuple(branch.repo_dir for branch in implementation.branches)
         existing_clone_count = sum(clone_dir.exists() for clone_dir in clone_dirs)
         if existing_clone_count not in {0, len(clone_dirs)}:
             raise DiamondDevError(
                 "Cannot auto-resume with missing implementation clone; "
-                f"expected both {implementation.codex_dir} and "
-                f"{implementation.claude_dir}",
+                f"expected all of {', '.join(str(path) for path in clone_dirs)}",
             )
         if existing_clone_count == len(clone_dirs):
             return self._resume_implementation_clones(context)
@@ -94,68 +85,71 @@ class RepositoryPreparationMixin:
         return self._clone_implementation_repositories(context)
 
     def _ensure_remote_workflow_branches_absent(self, context: RunContext) -> None:
-        for branch in (
-            context.implementation.codex_branch,
-            context.implementation.claude_branch,
-        ):
+        for implementation_branch in context.implementation.branches:
             if self.git.remote_url_branch_exists(
                 context.cwd,
                 remote_url=context.config.repository_url,
-                branch=branch,
-                log_name=f"remote-branch-exists-{branch}",
+                branch=implementation_branch.branch,
+                log_name=f"remote-branch-exists-{implementation_branch.branch}",
             ):
                 raise DiamondDevError(
                     "Workflow branch exists on origin but local implementation "
-                    f"clones are missing: {branch}",
+                    f"clones are missing: {implementation_branch.branch}",
                 )
 
     def _clone_implementation_repositories(self, context: RunContext) -> RunContext:
         implementation = context.implementation
+        primary_branch = implementation.primary_branch
         self.runner.run(
             (
                 "git",
                 "clone",
                 context.config.repository_url,
-                str(implementation.codex_dir),
+                str(primary_branch.repo_dir),
             ),
             cwd=context.cwd,
-            log_name="codex-clone",
+            log_name=f"{primary_branch.log_prefix}-clone",
         )
         context = self._with_remote_base_branch(context)
         implementation = context.implementation
-        self.runner.run(
-            (
-                "git",
-                "clone",
-                context.config.repository_url,
-                str(implementation.claude_dir),
-            ),
-            cwd=context.cwd,
-            log_name="claude-clone",
-        )
-        self.git.checkout_branch(
-            implementation.codex_dir,
-            branch=implementation.codex_branch,
-            base_branch=implementation.base_branch,
-            log_prefix="codex",
-        )
-        self.git.checkout_branch(
-            implementation.claude_dir,
-            branch=implementation.claude_branch,
-            base_branch=implementation.base_branch,
-            log_prefix="claude",
-        )
+        for branch in implementation.branches[1:]:
+            self._copy_implementation_repository(
+                source_dir=implementation.primary_branch.repo_dir,
+                target_dir=branch.repo_dir,
+            )
+        for branch in implementation.branches:
+            self.git.checkout_branch(
+                branch.repo_dir,
+                branch=branch.branch,
+                base_branch=implementation.base_branch,
+                log_prefix=branch.log_prefix,
+            )
         self._install_implementation_packages(implementation)
 
-        for repo_dir in (
-            implementation.codex_dir,
-            implementation.claude_dir,
-        ):
-            shutil.copy2(context.plan.path, repo_dir / context.plan.file_name)
+        for branch in implementation.branches:
+            shutil.copy2(context.plan.path, branch.repo_dir / context.plan.file_name)
         return context
 
+    def _copy_implementation_repository(
+        self,
+        *,
+        source_dir: Path,
+        target_dir: Path,
+    ) -> None:
+        logger.info(
+            "Copying implementation repository from {} to {}",
+            source_dir,
+            target_dir,
+        )
+        shutil.copytree(
+            source_dir,
+            target_dir,
+            copy_function=shutil.copy2,
+            symlinks=True,
+        )
+
     def _resume_implementation_clones(self, context: RunContext) -> RunContext:
-        for agent_branch in _resume_agent_branches(context):
+        for agent_branch in context.implementation.branches:
             self._validate_resume_clone(context, agent_branch)
         context = self._with_remote_base_branch(context)
         self._install_implementation_packages(context.implementation)
@@ -163,7 +157,9 @@ class RepositoryPreparationMixin:
 
     def _with_remote_base_branch(self, context: RunContext) -> RunContext:
         implementation = context.implementation.with_base_branch(
-            self.git.remote_default_branch(context.implementation.codex_dir),
+            self.git.remote_default_branch(
+                context.implementation.primary_branch.repo_dir,
+            ),
         )
         return context.with_implementation(implementation)
 
@@ -171,13 +167,13 @@ class RepositoryPreparationMixin:
         self,
         implementation: ImplementationContext,
     ) -> None:
-        self._install_packages(implementation.codex_dir, log_prefix="codex")
-        self._install_packages(implementation.claude_dir, log_prefix="claude")
+        for branch in implementation.branches:
+            self._install_packages(branch.repo_dir, log_prefix=branch.log_prefix)
 
     def _validate_resume_clone(
         self,
         context: RunContext,
-        agent_branch: ResumeAgentBranch,
+        agent_branch: ImplementationBranch,
     ) -> None:
         repo_dir = agent_branch.repo_dir
         branch = agent_branch.branch
@@ -242,20 +238,3 @@ class RepositoryPreparationMixin:
                 "No supported package lockfile found in {}; skipping install",
                 repo_dir,
             )
-
-
-def _resume_agent_branches(context: RunContext) -> tuple[ResumeAgentBranch, ...]:
-    return (
-        ResumeAgentBranch(
-            agent="codex",
-            repo_dir=context.implementation.codex_dir,
-            branch=context.implementation.codex_branch,
-            log_prefix="codex",
-        ),
-        ResumeAgentBranch(
-            agent="claude",
-            repo_dir=context.implementation.claude_dir,
-            branch=context.implementation.claude_branch,
-            log_prefix="claude",
-        ),
-    )

@@ -107,6 +107,106 @@ def test_load_config_reads_config_tables(tmp_path: Path) -> None:
     assert config.agents.gemini.model == "gemini-3"
 
 
+def test_load_config_reads_workflow_and_named_agent_alias(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[workflow]\n"
+        'implementers = ["codex", "claude", "claude-fixer"]\n'
+        'comparison_judge = "gemini"\n'
+        'comparison_fixer = "claude-fixer"\n'
+        'review_provider = "coderabbit"\n'
+        'review_judge = "codex"\n'
+        'review_fixer = "claude-fixer"\n'
+        'final_reviewer = "claude"\n'
+        "[agents.claude-fixer]\n"
+        'adapter = "claude"\n'
+        'model = "opus"',
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.workflow.implementers == ("codex", "claude", "claude-fixer")
+    assert config.workflow.comparison_fixer == "claude-fixer"
+    assert config.agent_adapter_name("claude-fixer") == "claude"
+    assert config.agent_config("claude-fixer").model == "opus"
+    assert config.required_cli_names() == ("codex", "claude", "gemini", "coderabbit")
+
+
+def test_load_config_reads_general_comparison_judgment_prompt(
+    tmp_path: Path,
+) -> None:
+    prompt_file = tmp_path / "compare.md"
+    prompt_file.write_text("Compare all branches.", encoding="utf-8")
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[prompts]\n"
+        'comparison_judgment_file = "compare.md"',
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.comparison_judgment_prompt_path() == prompt_file
+    assert read_gemini_prompt(config) == "Compare all branches."
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[workflow]\n"
+            'implementers = ["codex"]'
+        ),
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[workflow]\n"
+            'implementers = ["codex", "codex"]'
+        ),
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[workflow]\n"
+            'implementers = ["Codex", "claude"]'
+        ),
+    ],
+)
+def test_load_config_rejects_bad_implementer_lists(
+    tmp_path: Path,
+    config_text: str,
+) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(config_text, encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_config(tmp_path)
+
+
+def test_load_config_rejects_unknown_agent_adapter(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[workflow]\n"
+        'implementers = ["codex", "custom"]\n'
+        "[agents.custom]\n"
+        'adapter = "unknown"',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="unknown adapter"):
+        load_config(tmp_path)
+
+
+def test_load_config_rejects_role_capability_mismatch(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[workflow]\n"
+        'comparison_judge = "codex"',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="comparison_judge"):
+        load_config(tmp_path)
+
+
 def test_load_config_rejects_removed_notes_repository_url(tmp_path: Path) -> None:
     (tmp_path / CONFIG_FILE_NAME).write_text(
         'repository_url = "git@github.com:owner/repo.git"\n'

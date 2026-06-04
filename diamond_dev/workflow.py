@@ -14,7 +14,6 @@ from diamond_dev.naming import (
 )
 
 if TYPE_CHECKING:
-    from diamond_dev.acceptance import AgentChoice
     from diamond_dev.config import DiamondDevConfig
 
 
@@ -61,18 +60,65 @@ class WikiContext:
 
 
 @dataclass(frozen=True, slots=True)
+class ImplementationBranch:
+    """Resolved repository and branch details for one implementation agent."""
+
+    agent_name: str
+    repo_dir: Path
+    branch: str
+    log_prefix: str
+
+
+@dataclass(frozen=True, slots=True)
 class ImplementationContext:
     """Resolved implementation repository paths and branches."""
 
-    codex_dir: Path
-    claude_dir: Path
-    codex_branch: str
-    claude_branch: str
+    branches: tuple[ImplementationBranch, ...]
     base_branch: str = ""
 
     def with_base_branch(self, base_branch: str) -> ImplementationContext:
         """Return a copy with the resolved remote base branch."""
         return replace(self, base_branch=base_branch)
+
+    @property
+    def implementer_names(self) -> tuple[str, ...]:
+        """Return implementation agent names in workflow order."""
+        return tuple(branch.agent_name for branch in self.branches)
+
+    @property
+    def primary_branch(self) -> ImplementationBranch:
+        """Return the first implementation branch."""
+        try:
+            return self.branches[0]
+        except (IndexError,) as error:
+            raise DiamondDevError("Workflow has no implementation branches") from error
+
+    def branch_for(self, agent_name: str) -> ImplementationBranch:
+        """Return branch details for an implementation agent."""
+        for branch in self.branches:
+            if branch.agent_name == agent_name:
+                return branch
+        raise DiamondDevError(f"Unknown implementation agent: {agent_name}")
+
+    @property
+    def codex_dir(self) -> Path:
+        """Return the default Codex repo dir for legacy callers."""
+        return self.branch_for("codex").repo_dir
+
+    @property
+    def claude_dir(self) -> Path:
+        """Return the default Claude repo dir for legacy callers."""
+        return self.branch_for("claude").repo_dir
+
+    @property
+    def codex_branch(self) -> str:
+        """Return the default Codex branch for legacy callers."""
+        return self.branch_for("codex").branch
+
+    @property
+    def claude_branch(self) -> str:
+        """Return the default Claude branch for legacy callers."""
+        return self.branch_for("claude").branch
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,14 +157,41 @@ class RunContext:
         return replace(self, pr_url=pr_url)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class SelectedImplementation:
     """The implementation branch selected from the wiki comparison."""
 
-    accepted_agent: AgentChoice
-    opposite_agent: AgentChoice
+    accepted_agent: str
+    comparison_fixer: str
     repo_dir: Path
     branch: str
+
+    def __init__(
+        self,
+        *,
+        accepted_agent: str,
+        comparison_fixer: str | None = None,
+        opposite_agent: str | None = None,
+        repo_dir: Path,
+        branch: str,
+    ) -> None:
+        """Create selected implementation details.
+
+        `opposite_agent` is accepted as a compatibility alias for older tests and
+        callers; new code should pass `comparison_fixer`.
+        """
+        selected_fixer = comparison_fixer or opposite_agent
+        if selected_fixer is None:
+            raise DiamondDevError("Selected implementation requires a comparison fixer")
+        object.__setattr__(self, "accepted_agent", accepted_agent)
+        object.__setattr__(self, "comparison_fixer", selected_fixer)
+        object.__setattr__(self, "repo_dir", repo_dir)
+        object.__setattr__(self, "branch", branch)
+
+    @property
+    def opposite_agent(self) -> str:
+        """Return the comparison fixer for legacy callers."""
+        return self.comparison_fixer
 
 
 def resolve_plan_path(*, cwd: Path, plan_path: Path) -> Path:
@@ -155,29 +228,37 @@ def build_run_context(
             review_file=wiki_dir / f"{plan_slug}-review.md",
         ),
         implementation=ImplementationContext(
-            codex_dir=cwd / f"codex-{plan_slug}",
-            claude_dir=cwd / f"claude-{plan_slug}",
-            codex_branch=f"codex/{plan_slug}",
-            claude_branch=f"claude/{plan_slug}",
+            branches=tuple(
+                _implementation_branch(cwd, plan_slug, agent_name)
+                for agent_name in config.workflow.implementers
+            ),
         ),
     )
 
 
 def selected_implementation(
     context: RunContext,
-    accepted_agent: AgentChoice,
+    accepted_agent: str,
 ) -> SelectedImplementation:
-    """Return the accepted implementation repository and opposite agent."""
-    if accepted_agent == "codex":
-        return SelectedImplementation(
-            accepted_agent="codex",
-            opposite_agent="claude",
-            repo_dir=context.implementation.codex_dir,
-            branch=context.implementation.codex_branch,
-        )
+    """Return the accepted implementation repository and comparison fixer."""
+    accepted_branch = context.implementation.branch_for(accepted_agent)
+    comparison_fixer = context.config.workflow.comparison_fixer_for(accepted_agent)
     return SelectedImplementation(
-        accepted_agent="claude",
-        opposite_agent="codex",
-        repo_dir=context.implementation.claude_dir,
-        branch=context.implementation.claude_branch,
+        accepted_agent=accepted_agent,
+        comparison_fixer=comparison_fixer,
+        repo_dir=accepted_branch.repo_dir,
+        branch=accepted_branch.branch,
+    )
+
+
+def _implementation_branch(
+    cwd: Path,
+    plan_slug: str,
+    agent_name: str,
+) -> ImplementationBranch:
+    return ImplementationBranch(
+        agent_name=agent_name,
+        repo_dir=cwd / f"{agent_name}-{plan_slug}",
+        branch=f"{agent_name}/{plan_slug}",
+        log_prefix=agent_name,
     )

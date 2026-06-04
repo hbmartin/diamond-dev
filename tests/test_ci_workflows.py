@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 ACTION_USE_PATTERN = re.compile(r"^\s*uses:\s+(?P<reference>[^#\s]+)")
 FULL_SHA_REFERENCE_PATTERN = re.compile(r".+@[0-9a-f]{40}$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +32,25 @@ def _is_remote_action_reference(reference: str) -> bool:
     )
 
 
+def _load_ci_workflow() -> dict[str, object]:
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    assert isinstance(workflow, dict)
+    return workflow
+
+
+def _required_mapping(mapping: dict[str, object], key: str) -> dict[str, object]:
+    value = mapping[key]
+    assert isinstance(value, dict)
+    return value
+
+
+def _job_permissions(job: object) -> dict[str, object]:
+    assert isinstance(job, dict)
+    permissions = job.get("permissions", {})
+    assert isinstance(permissions, dict)
+    return permissions
+
+
 def test_github_actions_are_pinned_to_full_commit_shas() -> None:
     mutable_references = [
         f"{path.relative_to(REPO_ROOT)}:{line_number}: {reference}"
@@ -42,23 +63,28 @@ def test_github_actions_are_pinned_to_full_commit_shas() -> None:
 
 
 def test_ci_default_permissions_are_read_only() -> None:
-    workflow_text = CI_WORKFLOW.read_text(encoding="utf-8")
+    workflow = _load_ci_workflow()
+    permissions = _required_mapping(workflow, "permissions")
 
-    assert "\npermissions:\n  contents: read\n" in workflow_text
-    assert "issues: write" not in workflow_text
+    assert permissions["contents"] == "read"
+    assert permissions.get("issues") != "write"
+    assert all(value != "write" for value in permissions.values())
 
 
 def test_ci_pr_write_permission_is_isolated_to_pylint_comment_job() -> None:
-    workflow_text = CI_WORKFLOW.read_text(encoding="utf-8")
-    lint_job_start = workflow_text.index("  lint-type-test:")
-    comment_job_start = workflow_text.index("  pylint-pr-comment:")
-    pr_write_index = workflow_text.index("pull-requests: write")
+    workflow = _load_ci_workflow()
+    jobs = _required_mapping(workflow, "jobs")
+    comment_job = _required_mapping(jobs, "pylint-pr-comment")
+    comment_permissions = _required_mapping(comment_job, "permissions")
 
-    assert workflow_text.count("pull-requests: write") == 1
-    assert comment_job_start < pr_write_index
-    assert "pull-requests: write" not in workflow_text[
-        lint_job_start:comment_job_start
-    ]
+    assert "lint-type-test" in jobs
+    assert comment_permissions["pull-requests"] == "write"
+    assert [
+        job_name
+        for job_name, job in jobs.items()
+        if job_name != "pylint-pr-comment"
+        and _job_permissions(job).get("pull-requests") == "write"
+    ] == []
 
 
 def test_ci_pylint_pr_comment_uses_body_file() -> None:

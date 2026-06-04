@@ -23,6 +23,7 @@ dev = [
     "pyroma>=5.0.1",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "pyyaml>=6.0.3",
     "ruff>=0.15.15",
     "ty>=0.0.42",
 ]

@@ -24,6 +24,7 @@ from diamond_dev.pr import build_pr_body
 from diamond_dev.report import PhaseWarning
 from diamond_dev.workflow import (
     DirtyRecord,
+    ImplementationBranch,
     ImplementationContext,
     PlanContext,
     RunContext,
@@ -65,6 +66,7 @@ class _RecordingRunner:
         if command_tuple[:2] == ("git", "clone"):
             clone_dir = Path(command_tuple[-1])
             clone_dir.mkdir(parents=True, exist_ok=True)
+            (clone_dir / ".git").mkdir(exist_ok=True)
             for lockfile_name in self.clone_lockfiles_by_dir.get(clone_dir, ()):
                 (clone_dir / lockfile_name).write_text("", encoding="utf-8")
         if command_tuple[:3] == ("git", "ls-remote", "--exit-code"):
@@ -419,10 +421,20 @@ def build_context(tmp_path: Path) -> RunContext:
             review_file=tmp_path / "repo.wiki" / "my-plan-review.md",
         ),
         implementation=ImplementationContext(
-            codex_dir=tmp_path / "codex-my-plan",
-            claude_dir=tmp_path / "claude-my-plan",
-            codex_branch="codex/my-plan",
-            claude_branch="claude/my-plan",
+            branches=(
+                ImplementationBranch(
+                    agent_name="codex",
+                    repo_dir=tmp_path / "codex-my-plan",
+                    branch="codex/my-plan",
+                    log_prefix="codex",
+                ),
+                ImplementationBranch(
+                    agent_name="claude",
+                    repo_dir=tmp_path / "claude-my-plan",
+                    branch="claude/my-plan",
+                    log_prefix="claude",
+                ),
+            ),
             base_branch="main",
         ),
     )
@@ -535,8 +547,8 @@ def test_run_happy_path_walks_full_phase_sequence(
     log_labels = [command_log.label for command_log in runner.command_logs]
     assert log_labels.index("preflight-gh-auth") < log_labels.index("wiki-clone")
     assert log_labels.index("wiki-clone") < log_labels.index("codex-clone")
-    assert log_labels.index("codex-clone") < log_labels.index("claude-clone")
-    assert log_labels.index("claude-clone") < log_labels.index("gh-pr-create")
+    assert log_labels.index("codex-clone") < log_labels.index("gh-pr-create")
+    assert "claude-clone" not in log_labels
     assert any(command[:3] == ("gh", "pr", "create") for command in runner.commands)
     assert runner.interactive_commands == [
         (
@@ -616,6 +628,59 @@ def test_run_reports_warning_status_when_coderabbit_review_fails(
     assert "Workflow warnings:" in pr_body
     assert "CodeRabbit review (failed)" in pr_body
     assert "Codex review fixes (skipped)" in pr_body
+
+
+def test_run_uses_configured_review_fixer_and_final_reviewer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = tmp_path / "My Plan.md"
+    plan_path.write_text("# My Plan\n", encoding="utf-8")
+    (tmp_path / ".diamond-dev.toml").write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'wiki_repository_url = "git@github.com:owner/repo.wiki.git"\n'
+        "[workflow]\n"
+        'review_fixer = "claude-fixer"\n'
+        'final_reviewer = "claude-reviewer"\n'
+        "[agents.claude-fixer]\n"
+        'adapter = "claude"\n'
+        'model = "opus"\n'
+        "[agents.claude-reviewer]\n"
+        'adapter = "claude"\n'
+        'model = "sonnet"\n',
+        encoding="utf-8",
+    )
+    runner = _ScriptedRunner(tmp_path / "logs")
+    monkeypatch.setattr(
+        "diamond_dev.preflight.shutil.which",
+        lambda cli_name: f"/usr/bin/{cli_name}",
+    )
+    monkeypatch.setattr("diamond_dev.orchestrator.acceptance_wait_delays", lambda: (0,))
+    orchestrator = DiamondDevOrchestrator(
+        cwd=tmp_path,
+        runner=runner,
+        sleep=lambda _seconds: None,
+    )
+
+    exit_code = orchestrator.run(plan_path)
+
+    assert exit_code == 0
+    assert any(
+        command[:3] == ("claude", "--model", "opus")
+        for command in runner.commands
+    )
+    assert runner.interactive_commands[-1] == (
+        "claude",
+        "--model",
+        "sonnet",
+        "--permission-mode",
+        "bypassPermissions",
+        "--dangerously-skip-permissions",
+        "/review 123",
+    )
+    report = json.loads((tmp_path / "logs" / "run-report.json").read_text())
+    assert report["context"]["workflow_roles"]["review_fixer"] == "claude-fixer"
+    assert report["context"]["workflow_roles"]["final_reviewer"] == "claude-reviewer"
 
 
 def test_build_pr_body_includes_dirty_records(tmp_path: Path) -> None:
@@ -699,6 +764,8 @@ def test_prepare_implementation_clones_returns_context_without_mutation(
         base_branch: str,
         log_prefix: str,
     ) -> None:
+        assert context.implementation.claude_dir.is_dir()
+        assert (context.implementation.claude_dir / ".git").is_dir()
         checkout_calls.append((repo_dir, branch, base_branch, log_prefix))
 
     monkeypatch.setattr(orchestrator.git, "remote_default_branch", remote_default_branch)
@@ -721,9 +788,80 @@ def test_prepare_implementation_clones_returns_context_without_mutation(
         (context.implementation.codex_dir, "codex/my-plan", "trunk", "codex"),
         (context.implementation.claude_dir, "claude/my-plan", "trunk", "claude"),
     ]
+    assert [
+        command_call
+        for command_call in runner.command_calls
+        if command_call[0][:2] == ("git", "clone")
+    ] == [
+        (
+            (
+                "git",
+                "clone",
+                context.config.repository_url,
+                str(context.implementation.codex_dir),
+            ),
+            context.cwd,
+            "codex-clone",
+        ),
+    ]
     assert _install_calls(runner) == []
     assert (context.implementation.codex_dir / "My Plan.md").is_file()
     assert (context.implementation.claude_dir / "My Plan.md").is_file()
+
+
+def test_prepare_implementation_clones_copies_preserving_before_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    context = context.with_implementation(context.implementation.with_base_branch(""))
+    context.plan.path.write_text("# My Plan\n", encoding="utf-8")
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+
+    def remote_default_branch(repo_dir: Path) -> str:
+        assert repo_dir == context.implementation.codex_dir
+        symlink_target = repo_dir / "source.txt"
+        symlink_target.write_text("source\n", encoding="utf-8")
+        (repo_dir / "linked.txt").symlink_to("source.txt")
+        return "trunk"
+
+    def checkout_branch(
+        repo_dir: Path,
+        *,
+        branch: str,
+        base_branch: str,
+        log_prefix: str,
+    ) -> None:
+        assert repo_dir in {
+            context.implementation.codex_dir,
+            context.implementation.claude_dir,
+        }
+        assert branch in {
+            context.implementation.codex_branch,
+            context.implementation.claude_branch,
+        }
+        assert base_branch == "trunk"
+        assert log_prefix in {"codex", "claude"}
+        copied_link = context.implementation.claude_dir / "linked.txt"
+        assert copied_link.is_symlink()
+        assert copied_link.readlink() == Path("source.txt")
+        assert (context.implementation.claude_dir / ".git").is_dir()
+
+    monkeypatch.setattr(orchestrator.git, "remote_default_branch", remote_default_branch)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "remote_url_branch_exists",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(orchestrator.git, "checkout_branch", checkout_branch)
+
+    orchestrator._prepare_implementation_clones(context)  # noqa: SLF001
+
+    assert not any(
+        log_name == "claude-clone"
+        for _command, _cwd, log_name in runner.command_calls
+    )
 
 
 def test_prepare_implementation_clones_installs_uv_lockfiles(

@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-from diamond_dev.errors import ConfigError
+from diamond_dev.agents import (
+    AgentAdapter,
+    AgentCapability,
+    adapter_names,
+    resolve_adapter,
+)
+from diamond_dev.errors import ConfigError, DiamondDevError
 from diamond_dev.naming import is_git_remote_url
 
 CONFIG_FILE_NAME: Final = ".diamond-dev.toml"
+_AGENT_NAME_PATTERN: Final = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+DEFAULT_IMPLEMENTERS: Final = ("codex", "claude")
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +39,7 @@ class PromptConfig:
     """Prompt override file settings."""
 
     initial_implementation_file: str | None = None
+    comparison_judgment_file: str | None = None
     gemini_comparison_file: str | None = None
     comparison_implementation_file: str | None = None
     review_judgment_file: str | None = None
@@ -39,16 +50,96 @@ class PromptConfig:
 class AgentConfig:
     """External agent command settings."""
 
+    adapter: str | None = None
     model: str | None = None
+
+    def adapter_name(self, agent_name: str) -> str:
+        """Return the effective built-in adapter name for this agent."""
+        return self.adapter or agent_name
 
 
 @dataclass(frozen=True, slots=True)
 class AgentConfigs:
     """External agent settings by agent name."""
 
-    codex: AgentConfig = AgentConfig()
-    claude: AgentConfig = AgentConfig()
-    gemini: AgentConfig = AgentConfig()
+    by_name: Mapping[str, AgentConfig] = field(default_factory=dict)
+
+    def get(self, agent_name: str) -> AgentConfig:
+        """Return explicit or implicit built-in config for an agent name."""
+        if agent_name in self.by_name:
+            return self.by_name[agent_name]
+        if agent_name in adapter_names():
+            return AgentConfig(adapter=agent_name)
+        raise ConfigError(f"Unknown configured agent `{agent_name}`")
+
+    def __getattr__(self, agent_name: str) -> AgentConfig:
+        """Support legacy `config.agents.codex` style access."""
+        try:
+            return self.get(agent_name)
+        except (ConfigError,) as error:
+            raise AttributeError(agent_name) from error
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowConfig:
+    """Workflow role settings by configured agent name."""
+
+    implementers: tuple[str, ...] = DEFAULT_IMPLEMENTERS
+    comparison_judge: str = "gemini"
+    comparison_fixer: str | None = None
+    review_provider: str = "coderabbit"
+    review_judge: str = "codex"
+    review_fixer: str = "codex"
+    final_reviewer: str = "claude"
+
+    def role_agent_names(self) -> tuple[str, ...]:
+        """Return agent names referenced by this workflow."""
+        role_names = [
+            *self.implementers,
+            self.comparison_judge,
+            self.review_provider,
+            self.review_judge,
+            self.review_fixer,
+            self.final_reviewer,
+        ]
+        if self.comparison_fixer is not None:
+            role_names.append(self.comparison_fixer)
+        return tuple(dict.fromkeys(role_names))
+
+    def comparison_fixer_for(self, accepted_agent: str) -> str:
+        """Return the configured or default comparison fixer."""
+        if self.comparison_fixer is not None:
+            return self.comparison_fixer
+        for implementer in self.implementers:
+            if implementer != accepted_agent:
+                return implementer
+        raise ConfigError(
+            "Workflow requires at least one non-selected comparison fixer",
+        )
+
+    def role_capabilities(self) -> tuple[tuple[str, AgentCapability], ...]:
+        """Return configured role-agent capability requirements."""
+        requirements: list[tuple[str, AgentCapability]] = [
+            (implementer, "implementation")
+            for implementer in self.implementers
+        ]
+        requirements.extend(
+            (
+                (self.comparison_judge, "comparison_judge"),
+                (self.review_provider, "review_provider"),
+                (self.review_judge, "review_judge"),
+                (self.review_fixer, "review_fixer"),
+                (self.final_reviewer, "final_reviewer"),
+            ),
+        )
+        if self.comparison_fixer is not None:
+            requirements.append((self.comparison_fixer, "comparison_fixer"))
+        else:
+            requirements.extend(
+                (implementer, "comparison_fixer")
+                for implementer in self.implementers
+            )
+        return tuple(requirements)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +190,8 @@ class DiamondDevConfig:
     gemini_comparison_prompt_file: str | None = None
     notifications: NotificationConfig = NotificationConfig()
     prompts: PromptConfig = PromptConfig()
-    agents: AgentConfigs = AgentConfigs()
+    agents: AgentConfigs = field(default_factory=AgentConfigs)
+    workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
 
     @property
     def config_dir(self) -> Path:
@@ -108,8 +200,13 @@ class DiamondDevConfig:
 
     def gemini_prompt_path(self) -> Path | None:
         """Return the configured Gemini prompt file path, if any."""
+        return self.comparison_judgment_prompt_path()
+
+    def comparison_judgment_prompt_path(self) -> Path | None:
+        """Return the configured comparison judgment prompt file path, if any."""
         return self.prompt_path(
-            self.prompts.gemini_comparison_file
+            self.prompts.comparison_judgment_file
+            or self.prompts.gemini_comparison_file
             or self.gemini_comparison_prompt_file,
         )
 
@@ -122,6 +219,22 @@ class DiamondDevConfig:
         if prompt_path.is_absolute():
             return prompt_path
         return self.config_dir / prompt_path
+
+    def agent_config(self, agent_name: str) -> AgentConfig:
+        """Return the effective config for an agent name."""
+        return self.agents.get(agent_name)
+
+    def agent_adapter_name(self, agent_name: str) -> str:
+        """Return the built-in adapter backing a configured agent."""
+        return self.agent_config(agent_name).adapter_name(agent_name)
+
+    def required_cli_names(self) -> tuple[str, ...]:
+        """Return external executables required by configured workflow agents."""
+        executables = [
+            resolve_adapter(self.agent_adapter_name(agent_name)).executable
+            for agent_name in self.workflow.role_agent_names()
+        ]
+        return tuple(dict.fromkeys(executables))
 
 
 def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
@@ -150,6 +263,9 @@ def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
         config_path=resolved_config_path,
     )
     prompts = _load_prompts(raw_config, resolved_config_path)
+    workflow = _load_workflow(raw_config, resolved_config_path)
+    agents = _load_agents(raw_config, resolved_config_path)
+    _validate_agent_configuration(agents, workflow, resolved_config_path)
     return DiamondDevConfig(
         config_path=resolved_config_path,
         repository_url=repository_url,
@@ -158,20 +274,27 @@ def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
             "wiki_repository_url",
             resolved_config_path,
         ),
-        gemini_comparison_prompt_file=prompts.gemini_comparison_file,
+        gemini_comparison_prompt_file=prompts.comparison_judgment_file,
         notifications=_load_notifications(raw_config, resolved_config_path),
         prompts=prompts,
-        agents=_load_agents(raw_config, resolved_config_path),
+        agents=agents,
+        workflow=workflow,
     )
 
 
 def read_gemini_prompt(config: DiamondDevConfig) -> str | None:
     """Read the optional Gemini comparison prompt file."""
+    return read_comparison_judgment_prompt(config)
+
+
+def read_comparison_judgment_prompt(config: DiamondDevConfig) -> str | None:
+    """Read the optional comparison judgment prompt file."""
     return read_prompt_file(
         config,
-        config.prompts.gemini_comparison_file
+        config.prompts.comparison_judgment_file
+        or config.prompts.gemini_comparison_file
         or config.gemini_comparison_prompt_file,
-        label="Gemini comparison prompt",
+        label="Comparison judgment prompt",
     )
 
 
@@ -356,22 +479,19 @@ def _notification_string(
 
 def _load_prompts(raw_config: dict[str, Any], config_path: Path) -> PromptConfig:
     prompts = _optional_table(raw_config, "prompts", config_path)
+    comparison_judgment_file, gemini_comparison_file = _comparison_judgment_files(
+        raw_config,
+        prompts,
+        config_path,
+    )
     return PromptConfig(
         initial_implementation_file=_optional_string_with_label(
             prompts,
             "initial_implementation_file",
             "`prompts.initial_implementation_file`",
         ),
-        gemini_comparison_file=_modern_or_legacy_string(
-            raw_config=raw_config,
-            table=prompts,
-            alias=_TableLegacyAlias(
-                table_name="prompts",
-                modern_key="gemini_comparison_file",
-                legacy_key="gemini_comparison_prompt_file",
-            ),
-            config_path=config_path,
-        ),
+        comparison_judgment_file=comparison_judgment_file,
+        gemini_comparison_file=gemini_comparison_file,
         comparison_implementation_file=_optional_string_with_label(
             prompts,
             "comparison_implementation_file",
@@ -390,13 +510,110 @@ def _load_prompts(raw_config: dict[str, Any], config_path: Path) -> PromptConfig
     )
 
 
-def _load_agents(raw_config: dict[str, Any], config_path: Path) -> AgentConfigs:
-    agents = _optional_table(raw_config, "agents", config_path)
-    return AgentConfigs(
-        codex=_load_agent_config(agents, "codex", config_path),
-        claude=_load_agent_config(agents, "claude", config_path),
-        gemini=_load_agent_config(agents, "gemini", config_path),
+def _comparison_judgment_files(
+    raw_config: dict[str, Any],
+    prompts: dict[str, Any],
+    config_path: Path,
+) -> tuple[str | None, str | None]:
+    comparison_judgment_file = _optional_string_with_label(
+        prompts,
+        "comparison_judgment_file",
+        "`prompts.comparison_judgment_file`",
     )
+    gemini_comparison_file = _modern_or_legacy_string(
+        raw_config=raw_config,
+        table=prompts,
+        alias=_TableLegacyAlias(
+            table_name="prompts",
+            modern_key="gemini_comparison_file",
+            legacy_key="gemini_comparison_prompt_file",
+        ),
+        config_path=config_path,
+    )
+    if comparison_judgment_file is not None and gemini_comparison_file is not None:
+        raise ConfigError(
+            f"Config {config_path} sets both "
+            "`prompts.comparison_judgment_file` and a Gemini comparison prompt key",
+        )
+    return comparison_judgment_file or gemini_comparison_file, gemini_comparison_file
+
+
+def _load_workflow(raw_config: dict[str, Any], config_path: Path) -> WorkflowConfig:
+    workflow = _optional_table(raw_config, "workflow", config_path)
+    implementers = _optional_string_sequence(
+        workflow,
+        "implementers",
+        "`workflow.implementers`",
+    ) or DEFAULT_IMPLEMENTERS
+    if len(implementers) < 2:
+        raise ConfigError(
+            f"Config {config_path} `workflow.implementers` requires at least "
+            "two agents",
+        )
+    if len(set(implementers)) != len(implementers):
+        raise ConfigError(
+            f"Config {config_path} `workflow.implementers` contains duplicate agents",
+        )
+    _validate_agent_names(implementers, config_path)
+
+    comparison_judge = _optional_agent_name(
+        workflow,
+        "comparison_judge",
+        "`workflow.comparison_judge`",
+        config_path,
+    ) or "gemini"
+    comparison_fixer = _optional_agent_name(
+        workflow,
+        "comparison_fixer",
+        "`workflow.comparison_fixer`",
+        config_path,
+    )
+    review_provider = _optional_agent_name(
+        workflow,
+        "review_provider",
+        "`workflow.review_provider`",
+        config_path,
+    ) or "coderabbit"
+    review_judge = _optional_agent_name(
+        workflow,
+        "review_judge",
+        "`workflow.review_judge`",
+        config_path,
+    ) or "codex"
+    review_fixer = _optional_agent_name(
+        workflow,
+        "review_fixer",
+        "`workflow.review_fixer`",
+        config_path,
+    ) or "codex"
+    final_reviewer = _optional_agent_name(
+        workflow,
+        "final_reviewer",
+        "`workflow.final_reviewer`",
+        config_path,
+    ) or "claude"
+    return WorkflowConfig(
+        implementers=implementers,
+        comparison_judge=comparison_judge,
+        comparison_fixer=comparison_fixer,
+        review_provider=review_provider,
+        review_judge=review_judge,
+        review_fixer=review_fixer,
+        final_reviewer=final_reviewer,
+    )
+
+
+def _load_agents(raw_config: dict[str, Any], config_path: Path) -> AgentConfigs:
+    raw_agents = _optional_table(raw_config, "agents", config_path)
+    agent_configs: dict[str, AgentConfig] = {}
+    for agent_name in raw_agents:
+        _validate_agent_name(agent_name, config_path)
+        agent_configs[agent_name] = _load_agent_config(
+            raw_agents,
+            agent_name,
+            config_path,
+        )
+    return AgentConfigs(by_name=agent_configs)
 
 
 def _load_agent_config(
@@ -406,9 +623,107 @@ def _load_agent_config(
 ) -> AgentConfig:
     agent_config = _optional_table(raw_agents, agent_name, config_path)
     return AgentConfig(
+        adapter=_optional_agent_name(
+            agent_config,
+            "adapter",
+            f"`agents.{agent_name}.adapter`",
+            config_path,
+        ),
         model=_optional_string_with_label(
             agent_config,
             "model",
             f"`agents.{agent_name}.model`",
         ),
     )
+
+
+def _optional_string_sequence(
+    raw_config: dict[str, Any],
+    key: str,
+    label: str,
+) -> tuple[str, ...] | None:
+    value = raw_config.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, list | tuple):
+        raise ConfigError(f"Optional config key {label} must be an array when set")
+    strings: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise ConfigError(
+                f"Optional config key {label}[{index}] must be a non-empty string",
+            )
+        strings.append(item.strip())
+    return tuple(strings)
+
+
+def _optional_agent_name(
+    raw_config: dict[str, Any],
+    key: str,
+    label: str,
+    config_path: Path,
+) -> str | None:
+    agent_name = _optional_string_with_label(raw_config, key, label)
+    if agent_name is None:
+        return None
+    _validate_agent_name(agent_name, config_path)
+    return agent_name
+
+
+def _validate_agent_names(agent_names: tuple[str, ...], config_path: Path) -> None:
+    for agent_name in agent_names:
+        _validate_agent_name(agent_name, config_path)
+
+
+def _validate_agent_name(agent_name: str, config_path: Path) -> None:
+    if _AGENT_NAME_PATTERN.fullmatch(agent_name) is None:
+        raise ConfigError(
+            f"Config {config_path} agent name `{agent_name}` must contain only "
+            "lowercase letters, numbers, and single hyphen separators",
+        )
+
+
+def _validate_agent_configuration(
+    agents: AgentConfigs,
+    workflow: WorkflowConfig,
+    config_path: Path,
+) -> None:
+    for agent_name, agent_config in agents.by_name.items():
+        _validate_agent_adapter(agent_name, agent_config, config_path)
+    for agent_name in workflow.role_agent_names():
+        agent_config = agents.get(agent_name)
+        _validate_agent_adapter(agent_name, agent_config, config_path)
+    for agent_name, capability in workflow.role_capabilities():
+        adapter = _resolve_config_adapter(
+            agent_name,
+            agents.get(agent_name),
+            config_path,
+        )
+        if not adapter.has_capability(capability):
+            raise ConfigError(
+                f"Config {config_path} agent `{agent_name}` uses adapter "
+                f"`{adapter.name}`, which does not support `{capability}`",
+            )
+
+
+def _validate_agent_adapter(
+    agent_name: str,
+    agent_config: AgentConfig,
+    config_path: Path,
+) -> None:
+    _resolve_config_adapter(agent_name, agent_config, config_path)
+
+
+def _resolve_config_adapter(
+    agent_name: str,
+    agent_config: AgentConfig,
+    config_path: Path,
+) -> AgentAdapter:
+    adapter_name = agent_config.adapter_name(agent_name)
+    try:
+        return resolve_adapter(adapter_name)
+    except (DiamondDevError,) as error:
+        raise ConfigError(
+            f"Config {config_path} agent `{agent_name}` uses unknown adapter "
+            f"`{adapter_name}`",
+        ) from error

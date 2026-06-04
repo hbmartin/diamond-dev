@@ -53,7 +53,10 @@ def parse_existing_pull_request(gh_output: str) -> ExistingPullRequest | None:
     match payload:
         case []:
             return None
-        case [{"number": int(number), "state": str(state), "url": str(url)}, *_]:
+        case [
+            {"number": int() as number, "state": str() as state, "url": str() as url},
+            *_,
+        ]:
             return ExistingPullRequest(number=number, state=state, url=url)
         case [dict(), *_]:
             raise DiamondDevError(
@@ -75,11 +78,19 @@ def build_pr_body(
         "Automated diamond-dev implementation.",
         "",
         f"- Accepted implementation: {selected.accepted_agent}",
+        f"- Comparison fixer: {selected.comparison_fixer}",
         f"- Selected branch: {selected.branch}",
         f"- Base branch: {context.implementation.base_branch}",
         f"- Comparison wiki page: {context.wiki.comparison_file.name}",
         f"- Review wiki page: {context.wiki.review_file.name}",
     ]
+    body_lines.extend(("", "Implementation branches:"))
+    body_lines.extend(
+        f"- {branch.agent_name}: {branch.branch}"
+        for branch in context.implementation.branches
+    )
+    body_lines.extend(("", "Workflow roles:"))
+    body_lines.extend(_workflow_role_lines(context))
     if context.dirty_records:
         body_lines.extend(("", "Uncommitted dirty files observed:"))
         body_lines.extend(
@@ -108,3 +119,17 @@ def _warning_line(warning: PhaseWarning) -> str:
     if warning.log_name:
         details.append(f"log: {warning.log_name}")
     return f"- {warning.phase} ({warning.status}): {'; '.join(details)}"
+
+
+def _workflow_role_lines(context: RunContext) -> list[str]:
+    workflow = context.config.workflow
+    comparison_fixer = workflow.comparison_fixer or "first non-selected implementer"
+    return [
+        f"- Implementers: {', '.join(workflow.implementers)}",
+        f"- Comparison judge: {workflow.comparison_judge}",
+        f"- Comparison fixer: {comparison_fixer}",
+        f"- Review provider: {workflow.review_provider}",
+        f"- Review judge: {workflow.review_judge}",
+        f"- Review fixer: {workflow.review_fixer}",
+        f"- Final reviewer: {workflow.final_reviewer}",
+    ]

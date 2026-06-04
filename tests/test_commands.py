@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from diamond_dev.commands import (
+    ComparisonBranchContext,
     ComparisonPromptContext,
     build_claude_interactive_review_command,
     build_claude_print_command,
@@ -220,10 +221,18 @@ def test_gemini_prompt_includes_custom_prompt_and_context(tmp_path: Path) -> Non
         "Custom compare rules.",
         ComparisonPromptContext(
             base_branch="main",
-            codex_branch="codex/my-plan",
-            claude_branch="claude/my-plan",
-            codex_dir=codex_dir,
-            claude_dir=claude_dir,
+            branches=(
+                ComparisonBranchContext(
+                    agent_name="codex",
+                    branch="codex/my-plan",
+                    repo_dir=codex_dir,
+                ),
+                ComparisonBranchContext(
+                    agent_name="claude",
+                    branch="claude/my-plan",
+                    repo_dir=claude_dir,
+                ),
+            ),
         ),
     )
 
@@ -240,11 +249,19 @@ def test_gemini_prompt_uses_fallback_for_whitespace_prompt(
         "   ",
         ComparisonPromptContext(
             base_branch="main",
-            codex_branch="codex/my-plan",
-            claude_branch="claude/my-plan",
-            codex_dir=tmp_path / "codex-my-plan",
-            claude_dir=tmp_path / "claude-my-plan",
+            branches=(
+                ComparisonBranchContext(
+                    agent_name="codex",
+                    branch="codex/my-plan",
+                    repo_dir=tmp_path / "codex-my-plan",
+                ),
+                ComparisonBranchContext(
+                    agent_name="claude",
+                    branch="claude/my-plan",
+                    repo_dir=tmp_path / "claude-my-plan",
+                ),
+            ),
         ),
     )
 
-    assert "Compare the Codex and Claude implementation branches" in prompt
+    assert "Compare the implementation branches" in prompt
