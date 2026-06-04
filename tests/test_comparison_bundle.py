@@ -53,6 +53,7 @@ class _FakeGit:
         self.dirty_labels: list[str] = []
 
     def revision(self, repo_dir: Path, ref: str, *, log_name: str) -> str:
+        del log_name
         return f"{repo_dir.name}-{ref.replace('/', '-')}-sha"
 
     def branch_ahead_behind(
@@ -63,6 +64,7 @@ class _FakeGit:
         base_branch: str,
         log_name: str,
     ) -> BranchAheadBehind:
+        del branch, log_name
         return BranchAheadBehind(ahead=len(repo_dir.name), behind=len(base_branch))
 
     def run(
@@ -72,6 +74,7 @@ class _FakeGit:
         log_name: str,
         check: bool = True,
     ) -> CommandResult:
+        del check
         output = ""
         if args[:2] == ("diff", "--name-status"):
             output = self.name_status[repo_dir.name]
@@ -94,6 +97,7 @@ class _FakeGit:
         *,
         log_prefix: str | None = None,
     ) -> RunContext:
+        del repo_dir, log_prefix
         self.dirty_labels.append(label)
         return context.with_dirty_record(
             DirtyRecord(label=label, branch=branch, files=("dirty.txt",)),
@@ -233,17 +237,48 @@ def test_comparison_bundle_reports_capped_lists_and_diffs(tmp_path: Path) -> Non
     assert "by total diff cap" in bundle
 
 
+def test_comparison_bundle_reports_all_changed_files_omitted_by_budget(
+    tmp_path: Path,
+) -> None:
+    context = _context(
+        tmp_path,
+        comparison=ComparisonConfig(max_file_diff_bytes=1),
+    )
+    runner = _FakeRunner(tmp_path)
+    git = _FakeGit(tmp_path)
+    git.name_status = {
+        "codex-my-plan": "M\tsrc/app.py\n",
+        "claude-my-plan": "A\tREADME.md\n",
+    }
+    git.diffs = {
+        ("codex-my-plan", "src/app.py"): "diff --git a/src/app.py b/src/app.py\n",
+        ("claude-my-plan", "README.md"): "diff --git a/README.md b/README.md\n",
+    }
+
+    write_comparison_bundle(
+        context=context,
+        runner=runner,  # type: ignore[arg-type]
+        git=git,  # type: ignore[arg-type]
+    )
+
+    bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
+    assert "- No changed files." not in bundle
+    assert "- All changed files omitted due to byte budget." in bundle
+    assert "Omitted changed files:" in bundle
+
+
 def _context(
     tmp_path: Path,
     *,
-    comparison: ComparisonConfig = ComparisonConfig(),
+    comparison: ComparisonConfig | None = None,
 ) -> RunContext:
+    comparison_config = comparison if comparison is not None else ComparisonConfig()
     return RunContext(
         cwd=tmp_path,
         config=DiamondDevConfig(
             config_path=tmp_path / ".diamond-dev.toml",
             repository_url="git@github.com:owner/repo.git",
-            comparison=comparison,
+            comparison=comparison_config,
         ),
         plan=PlanContext(
             path=tmp_path / "My Plan.md",

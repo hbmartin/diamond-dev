@@ -236,4 +236,4 @@ def _required_string(payload: dict[str, object], key: str) -> str:
 
 
 def _markdown_cell(value: str) -> str:
-    return value.replace("\n", " ").replace("|", "\\|")
+    return value.replace("\r", "").replace("\n", " ").replace("|", "\\|")

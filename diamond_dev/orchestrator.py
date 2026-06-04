@@ -79,6 +79,8 @@ T = TypeVar("T")
 class DiamondDevOrchestrator(RepositoryPreparationMixin):
     """Coordinate the full Diamond Dev multi-agent workflow."""
 
+    # pylint: disable=too-many-instance-attributes
+
     def __init__(  # noqa: PLR0913
         self,
         *,

@@ -1,5 +1,7 @@
 """Configuration loading for Diamond Dev."""
 
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import re
@@ -196,6 +198,8 @@ _NOTIFICATION_ALIASES: Final = {
 @dataclass(frozen=True, slots=True)
 class DiamondDevConfig:
     """Typed `.diamond-dev.toml` settings."""
+
+    # pylint: disable=too-many-instance-attributes
 
     config_path: Path
     repository_url: str
@@ -555,11 +559,16 @@ def _comparison_judgment_files(
 
 def _load_workflow(raw_config: dict[str, Any], config_path: Path) -> WorkflowConfig:
     workflow = _optional_table(raw_config, "workflow", config_path)
-    implementers = _optional_string_sequence(
+    configured_implementers = _optional_string_sequence(
         workflow,
         "implementers",
         "`workflow.implementers`",
-    ) or DEFAULT_IMPLEMENTERS
+    )
+    implementers = (
+        DEFAULT_IMPLEMENTERS
+        if configured_implementers is None
+        else configured_implementers
+    )
     if len(implementers) < 2:
         raise ConfigError(
             f"Config {config_path} `workflow.implementers` requires at least "

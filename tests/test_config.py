@@ -170,6 +170,11 @@ def test_load_config_reads_general_comparison_judgment_prompt(
         (
             'repository_url = "git@github.com:owner/repo.git"\n'
             "[workflow]\n"
+            "implementers = []"
+        ),
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[workflow]\n"
             'implementers = ["codex"]'
         ),
         (

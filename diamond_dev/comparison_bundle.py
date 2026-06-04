@@ -200,6 +200,9 @@ def _changed_file_list_lines(
     changed_files: Sequence[_ChangedFile],
     byte_budget: int,
 ) -> list[str]:
+    if not changed_files:
+        return ["- No changed files."]
+
     included, omitted = _capped_lines(
         (
             f"- {changed_file.status}: {changed_file.display_path}"
@@ -208,7 +211,7 @@ def _changed_file_list_lines(
         max_bytes=byte_budget,
     )
     if not included:
-        included = ["- No changed files."]
+        included = ["- All changed files omitted due to byte budget."]
     if omitted:
         included.extend(("", "Omitted changed files:", *omitted))
     return included
@@ -325,12 +328,11 @@ def _capped_lines(
     omitted: list[str] = []
     used_bytes = 0
     for line in lines:
-        line_text = str(line)
-        line_bytes = len(f"{line_text}\n".encode())
+        line_bytes = len(f"{line}\n".encode())
         if used_bytes + line_bytes > max_bytes:
-            omitted.append(line_text)
+            omitted.append(line)
             continue
-        included.append(line_text)
+        included.append(line)
         used_bytes += line_bytes
     return included, omitted
 
