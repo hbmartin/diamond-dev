@@ -179,6 +179,27 @@ def test_upsert_structured_judgments_section_inserts_and_replaces() -> None:
     assert replaced.count("## Structured review judgments") == 1
 
 
+def test_upsert_structured_judgments_section_normalizes_crlf_cells() -> None:
+    judgments = ReviewJudgments(
+        review_file="review.md",
+        review_provider="coderabbit",
+        review_judge="codex",
+        findings=(
+            ReviewFinding(
+                id="CR-1",
+                decision="fix",
+                confidence=0.75,
+                rationale="First line\r\nSecond | line",
+            ),
+        ),
+    )
+
+    markdown = upsert_structured_judgments_section("# Review", judgments)
+
+    assert "\r" not in markdown
+    assert "First line Second \\| line" in markdown
+
+
 def test_summarize_review_judgments_counts_decisions() -> None:
     summary = summarize_review_judgments(
         ReviewJudgments(
