@@ -123,15 +123,9 @@ class RepositoryPreparationMixin:
         )
         context = self._with_remote_base_branch(context)
         implementation = context.implementation
-        self.runner.run(
-            (
-                "git",
-                "clone",
-                context.config.repository_url,
-                str(implementation.claude_dir),
-            ),
-            cwd=context.cwd,
-            log_name="claude-clone",
+        self._copy_implementation_repository(
+            source_dir=implementation.codex_dir,
+            target_dir=implementation.claude_dir,
         )
         self.git.checkout_branch(
             implementation.codex_dir,
@@ -153,6 +147,24 @@ class RepositoryPreparationMixin:
         ):
             shutil.copy2(context.plan.path, repo_dir / context.plan.file_name)
         return context
+
+    def _copy_implementation_repository(
+        self,
+        *,
+        source_dir: Path,
+        target_dir: Path,
+    ) -> None:
+        logger.info(
+            "Copying implementation repository from {} to {}",
+            source_dir,
+            target_dir,
+        )
+        shutil.copytree(
+            source_dir,
+            target_dir,
+            copy_function=shutil.copy2,
+            symlinks=True,
+        )
 
     def _resume_implementation_clones(self, context: RunContext) -> RunContext:
         for agent_branch in _resume_agent_branches(context):

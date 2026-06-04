@@ -53,7 +53,10 @@ def parse_existing_pull_request(gh_output: str) -> ExistingPullRequest | None:
     match payload:
         case []:
             return None
-        case [{"number": int(number), "state": str(state), "url": str(url)}, *_]:
+        case [
+            {"number": int() as number, "state": str() as state, "url": str() as url},
+            *_,
+        ]:
             return ExistingPullRequest(number=number, state=state, url=url)
         case [dict(), *_]:
             raise DiamondDevError(

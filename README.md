@@ -114,16 +114,19 @@ For a plan named `My Plan.md`, the command uses the slug `my-plan` and creates:
 - `<repo-name>.wiki` for the GitHub Gollum wiki
 
 The wiki clone is reused if present and synchronized with fast-forward-only
-pulls. Implementation clone directories are created on a fresh run and are
-required on an auto-resume run.
+pulls. On a fresh run, `diamond-dev` clones the implementation repository once,
+makes a preserving local copy for the second agent, then checks out each
+workflow branch. Implementation clone directories are required on an auto-resume
+run.
 
-After each implementation clone is prepared on its workflow branch,
-`diamond-dev` checks the clone root for package lockfiles. If `uv.lock` exists,
-it runs `uv sync --locked`; if `pnpm-lock.yaml` exists, it runs
+After each implementation clone is prepared on its workflow branch, `diamond-dev`
+checks that clone root for package lockfiles. If `uv.lock` exists, it runs
+`uv sync --locked`; if `pnpm-lock.yaml` exists, it runs
 `pnpm install --frozen-lockfile`. Repositories with both lockfiles run both
-commands in that order. Repositories with neither lockfile skip package install.
-These install commands can execute dependency lifecycle scripts from the target
-repository, so run `diamond-dev` only against repositories you trust.
+commands in that order in each clone. Repositories with neither lockfile skip
+package install. These install commands can execute dependency lifecycle scripts
+from the target repository, so run `diamond-dev` only against repositories you
+trust.
 
 ## Auto-Resume
 
