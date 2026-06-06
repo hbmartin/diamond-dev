@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import shutil
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -322,7 +322,7 @@ class DiamondDevOrchestrator(
         return active_context, selected_implementation
 
     @contextmanager
-    def _reported_run(self) -> Iterator[_RunState]:
+    def _reported_run(self) -> Generator[_RunState]:
         run_state = _RunState()
         try:
             yield run_state
@@ -592,7 +592,12 @@ def _phase_error_message(error: BaseException) -> str:
 
 def _phase_error_log_path(error: BaseException) -> str | None:
     current_error: BaseException | None = error
+    seen: set[int] = set()
     while current_error is not None:
+        current_error_id = id(current_error)
+        if current_error_id in seen:
+            break
+        seen.add(current_error_id)
         if isinstance(current_error, CommandFailureError):
             return current_error.log_path
         if current_error.__cause__ is not None:
