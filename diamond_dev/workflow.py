@@ -60,6 +60,60 @@ class PlanContext:
 
 
 @dataclass(frozen=True, slots=True)
+class CommitPairEntry:
+    """Resolved metadata for one commit-pair comparison input."""
+
+    label: str
+    original_arg: str
+    sha: str
+    short_sha: str
+    message: str
+    ref_names: tuple[str, ...]
+    branch: str
+    source: str = "remote"
+
+
+@dataclass(frozen=True, slots=True)
+class CommitPairContext:
+    """Resolved metadata for a two-commit comparison workflow."""
+
+    slug: str
+    entries: tuple[CommitPairEntry, CommitPairEntry]
+
+    @property
+    def marker(self) -> str:
+        """Return the stable hidden marker payload for wiki artifacts."""
+        left, right = self.entries
+        return (
+            "<!-- diamond-dev commit-pair: "
+            f"left={left.sha} right={right.sha} slug={self.slug} "
+            f"left_label={left.label} right_label={right.label} "
+            "-->"
+        )
+
+    @property
+    def index_line(self) -> str:
+        """Return the stable wiki index entry for this ordered commit pair."""
+        left, right = self.entries
+        return (
+            f"- `{left.sha}` vs `{right.sha}` -> `{self.slug}` "
+            f"({left.label}/{right.label})"
+        )
+
+    @property
+    def labels(self) -> tuple[str, str]:
+        """Return labels in argument order."""
+        left, right = self.entries
+        return (left.label, right.label)
+
+    @property
+    def shas(self) -> tuple[str, str]:
+        """Return full SHAs in argument order."""
+        left, right = self.entries
+        return (left.sha, right.sha)
+
+
+@dataclass(frozen=True, slots=True)
 class WikiContext:
     """Resolved GitHub Gollum wiki repository paths."""
 
@@ -142,8 +196,14 @@ class RunContext:
     plan: PlanContext
     wiki: WikiContext
     implementation: ImplementationContext
+    commit_pair: CommitPairContext | None = None
     dirty_records: tuple[DirtyRecord, ...] = ()
     pr_url: str | None = None
+
+    @property
+    def is_commit_pair(self) -> bool:
+        """Return whether this run compares two existing commits."""
+        return self.commit_pair is not None
 
     @property
     def comparison_file(self) -> Path:
@@ -255,13 +315,55 @@ def build_run_context(
     )
 
 
+def build_commit_pair_run_context(
+    *,
+    cwd: Path,
+    slug: str,
+    entries: tuple[CommitPairEntry, CommitPairEntry],
+    config: DiamondDevConfig,
+) -> RunContext:
+    """Build resolved workflow context for a two-commit comparison."""
+    wiki_url = config.wiki_repository_url or derive_wiki_repository_url(
+        config.repository_url,
+    )
+    wiki_dir = cwd / wiki_directory_name(wiki_url)
+    return RunContext(
+        cwd=cwd,
+        config=config,
+        plan=PlanContext(path=cwd / f"{slug}.md", slug=slug),
+        wiki=WikiContext(
+            url=wiki_url,
+            directory=wiki_dir,
+            comparison_file=wiki_dir / f"{slug}-comparison.md",
+            comparison_bundle_file=wiki_dir / f"{slug}-comparison-bundle.md",
+            review_file=wiki_dir / f"{slug}-review.md",
+            review_judgments_file=wiki_dir / f"{slug}-review-judgments.json",
+        ),
+        implementation=ImplementationContext(
+            branches=tuple(
+                ImplementationBranch(
+                    agent_name=entry.label,
+                    repo_dir=cwd / f"{entry.label}-{slug}",
+                    branch=entry.branch,
+                    log_prefix=entry.label,
+                )
+                for entry in entries
+            ),
+        ),
+        commit_pair=CommitPairContext(slug=slug, entries=entries),
+    )
+
+
 def selected_implementation(
     context: RunContext,
     accepted_agent: str,
 ) -> SelectedImplementation:
     """Return the accepted implementation repository and comparison fixer."""
     accepted_branch = context.implementation.branch_for(accepted_agent)
-    comparison_fixer = context.config.workflow.comparison_fixer_for(accepted_agent)
+    if context.commit_pair is not None:
+        comparison_fixer = _commit_pair_comparison_fixer(context, accepted_agent)
+    else:
+        comparison_fixer = context.config.workflow.comparison_fixer_for(accepted_agent)
     return SelectedImplementation(
         accepted_agent=accepted_agent,
         comparison_fixer=comparison_fixer,
@@ -281,3 +383,13 @@ def _implementation_branch(
         branch=f"{agent_name}/{plan_slug}",
         log_prefix=agent_name,
     )
+
+
+def _commit_pair_comparison_fixer(context: RunContext, accepted_agent: str) -> str:
+    if context.config.workflow.comparison_fixer is not None:
+        return context.config.workflow.comparison_fixer
+
+    labels = set(context.commit_pair.labels if context.commit_pair is not None else ())
+    if labels == {"codex", "claude"}:
+        return "claude" if accepted_agent == "codex" else "codex"
+    return "codex"

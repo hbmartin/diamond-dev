@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from diamond_dev.git_ops import GitOperations
     from diamond_dev.providers import GitHubWorkflowProvider
     from diamond_dev.workflow import (
+        CommitPairEntry,
         ImplementationBranch,
         ImplementationContext,
         RunContext,
@@ -57,20 +58,33 @@ class RepositoryPreparationMixin:
         )
 
     def _ensure_wiki_repo(self, context: RunContext) -> None:
-        if context.wiki.directory.exists():
+        self._ensure_wiki_repo_at(
+            cwd=context.cwd,
+            wiki_url=context.wiki.url,
+            wiki_dir=context.wiki.directory,
+        )
+
+    def _ensure_wiki_repo_at(
+        self,
+        *,
+        cwd: Path,
+        wiki_url: str,
+        wiki_dir: Path,
+    ) -> None:
+        if wiki_dir.exists():
             if not self.git.is_git_repo(
-                context.wiki.directory,
+                wiki_dir,
                 log_name="wiki-is-git-repo",
             ):
                 raise DiamondDevError(
-                    f"Existing wiki path is not a Git repo: {context.wiki.directory}",
+                    f"Existing wiki path is not a Git repo: {wiki_dir}",
                 )
-            self.workflow_provider.sync_wiki(context.wiki.directory)
+            self.workflow_provider.sync_wiki(wiki_dir)
             return
 
         self.runner.run(
-            ("git", "clone", context.wiki.url, str(context.wiki.directory)),
-            cwd=context.cwd,
+            ("git", "clone", wiki_url, str(wiki_dir)),
+            cwd=cwd,
             log_name="wiki-clone",
         )
 
@@ -88,6 +102,20 @@ class RepositoryPreparationMixin:
 
         self._ensure_remote_workflow_branches_absent(context)
         return self._clone_implementation_repositories(context)
+
+    def _prepare_commit_pair_clones(self, context: RunContext) -> RunContext:
+        """Prepare or resume implementation clones for a commit-pair run."""
+        implementation = context.implementation
+        clone_dirs = tuple(branch.repo_dir for branch in implementation.branches)
+        existing_clone_count = sum(clone_dir.exists() for clone_dir in clone_dirs)
+        if existing_clone_count not in {0, len(clone_dirs)}:
+            raise DiamondDevError(
+                "Cannot auto-resume with missing commit comparison clone; "
+                f"expected all of {', '.join(str(path) for path in clone_dirs)}",
+            )
+        if existing_clone_count == len(clone_dirs):
+            return self._resume_commit_pair_clones(context)
+        return self._clone_commit_pair_repositories(context)
 
     def _ensure_remote_workflow_branches_absent(self, context: RunContext) -> None:
         for implementation_branch in context.implementation.branches:
@@ -135,6 +163,39 @@ class RepositoryPreparationMixin:
             shutil.copy2(context.plan.path, branch.repo_dir / context.plan.file_name)
         return context
 
+    def _clone_commit_pair_repositories(self, context: RunContext) -> RunContext:
+        commit_pair = context.commit_pair
+        if commit_pair is None:
+            raise DiamondDevError("Commit-pair clone preparation requires metadata")
+
+        implementation = context.implementation
+        primary_branch = implementation.primary_branch
+        self.runner.run(
+            (
+                "git",
+                "clone",
+                context.config.repository_url,
+                str(primary_branch.repo_dir),
+            ),
+            cwd=context.cwd,
+            log_name=f"{primary_branch.log_prefix}-clone",
+        )
+        context = self._with_remote_base_branch(context)
+        implementation = context.implementation
+        for branch in implementation.branches[1:]:
+            self._copy_implementation_repository(
+                source_dir=implementation.primary_branch.repo_dir,
+                target_dir=branch.repo_dir,
+            )
+        for branch, entry in zip(
+            implementation.branches,
+            commit_pair.entries,
+            strict=True,
+        ):
+            self._checkout_commit_pair_branch(context, branch, entry)
+        self._install_implementation_packages(implementation)
+        return context
+
     def _copy_implementation_repository(
         self,
         *,
@@ -154,6 +215,13 @@ class RepositoryPreparationMixin:
         )
 
     def _resume_implementation_clones(self, context: RunContext) -> RunContext:
+        for agent_branch in context.implementation.branches:
+            self._validate_resume_clone(context, agent_branch)
+        context = self._with_remote_base_branch(context)
+        self._install_implementation_packages(context.implementation)
+        return context
+
+    def _resume_commit_pair_clones(self, context: RunContext) -> RunContext:
         for agent_branch in context.implementation.branches:
             self._validate_resume_clone(context, agent_branch)
         context = self._with_remote_base_branch(context)
@@ -221,6 +289,38 @@ class RepositoryPreparationMixin:
             raise DiamondDevError(
                 f"Cannot auto-resume divergent workflow branch: {branch}",
             )
+
+    def _checkout_commit_pair_branch(
+        self,
+        context: RunContext,
+        branch: ImplementationBranch,
+        entry: CommitPairEntry,
+    ) -> None:
+        if entry.source == "local":
+            self.runner.run(
+                ("git", "fetch", str(context.cwd), entry.sha),
+                cwd=branch.repo_dir,
+                log_name=f"{branch.log_prefix}-local-commit-fetch",
+            )
+        remote_exists = self.git.remote_branch_exists(
+            branch.repo_dir,
+            branch.branch,
+            log_name=f"{branch.log_prefix}-commit-remote-branch-exists",
+        )
+        generated_branch = branch.branch.startswith(f"diamond-dev/{context.plan.slug}/")
+        checkout_ref = (
+            f"origin/{branch.branch}"
+            if remote_exists and generated_branch
+            else entry.sha
+        )
+        self.git.run(
+            branch.repo_dir,
+            "checkout",
+            "-B",
+            branch.branch,
+            checkout_ref,
+            log_name=f"{branch.log_prefix}-commit-checkout",
+        )
 
     def _install_packages(self, repo_dir: Path, *, log_prefix: str) -> None:
         supported_lockfile_found = False

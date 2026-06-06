@@ -16,6 +16,15 @@ def test_parse_args_accepts_config_path() -> None:
     assert args.command == "run"
     assert args.config == Path("custom.toml")
     assert args.plan_path == Path("plan.md")
+    assert args.commit_args is None
+
+
+def test_parse_args_accepts_two_commit_refs() -> None:
+    args = parse_args(["abc123", "def456"])
+
+    assert args.command == "compare-commits"
+    assert args.plan_path is None
+    assert args.commit_args == ("abc123", "def456")
 
 
 def test_parse_args_accepts_init_command() -> None:
@@ -55,6 +64,13 @@ def test_parse_args_rejects_force_for_run() -> None:
     assert exit_info.value.code == 2
 
 
+def test_parse_args_rejects_invalid_positional_arity() -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        parse_args(["one", "two", "three"])
+
+    assert exit_info.value.code == 2
+
+
 def test_parse_args_supports_version_flag() -> None:
     with pytest.raises(SystemExit) as exit_info:
         parse_args(["--version"])
@@ -79,3 +95,20 @@ def test_main_dispatches_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
     assert main_module.main(["init", "--config", "custom.toml", "--force"]) == 0
     assert calls == [(tmp_path, Path("custom.toml"), True)]
+
+
+def test_main_dispatches_commit_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class FakeOrchestrator:
+        def __init__(self, *, config_path: Path | None = None) -> None:
+            assert config_path == Path("custom.toml")
+
+        def run_commits(self, commit_args: tuple[str, str]) -> int:
+            calls.append(commit_args)
+            return 0
+
+    monkeypatch.setattr(main_module, "DiamondDevOrchestrator", FakeOrchestrator)
+
+    assert main_module.main(["--config", "custom.toml", "abc123", "def456"]) == 0
+    assert calls == [("abc123", "def456")]

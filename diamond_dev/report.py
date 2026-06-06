@@ -101,9 +101,11 @@ def _context_payload(context: RunContext | None) -> dict[str, object] | None:
         return None
 
     return {
+        "mode": "commit_pair" if context.commit_pair is not None else "plan",
         "cwd": str(context.cwd),
         "config_path": str(context.config.config_path),
         "plan_path": str(context.plan.path),
+        "commit_pair": _commit_pair_payload(context),
         "repository_url": context.config.repository_url,
         "wiki_repository_url": context.wiki.url,
         "branches": _branch_payload(context),
@@ -130,6 +132,27 @@ def _context_payload(context: RunContext | None) -> dict[str, object] | None:
                 "files": list(dirty_record.files),
             }
             for dirty_record in context.dirty_records
+        ],
+    }
+
+
+def _commit_pair_payload(context: RunContext) -> dict[str, object] | None:
+    if context.commit_pair is None:
+        return None
+
+    return {
+        "slug": context.commit_pair.slug,
+        "entries": [
+            {
+                "label": entry.label,
+                "original_arg": entry.original_arg,
+                "sha": entry.sha,
+                "short_sha": entry.short_sha,
+                "branch": entry.branch,
+                "source": entry.source,
+                "refs": list(entry.ref_names),
+            }
+            for entry in context.commit_pair.entries
         ],
     }
 

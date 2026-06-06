@@ -29,6 +29,15 @@ from diamond_dev.commands import (
     review_fix_prompt,
     review_judgment_prompt,
 )
+from diamond_dev.commit_pair import (
+    build_commit_pair_entries,
+    choose_commit_pair_slug,
+    comparison_has_matching_commit_pair_marker,
+    ensure_commit_pair_marker,
+    infer_commit_labels,
+    resolve_commit_pair_inputs,
+    upsert_commit_pair_index,
+)
 from diamond_dev.comparison_bundle import write_comparison_bundle
 from diamond_dev.config import (
     load_config,
@@ -44,6 +53,7 @@ from diamond_dev.executor import (
 )
 from diamond_dev.git_ops import GitOperations
 from diamond_dev.markdown import read_normalized_markdown
+from diamond_dev.naming import derive_wiki_repository_url, wiki_directory_name
 from diamond_dev.notify import notify_url
 from diamond_dev.orchestrator_repositories import RepositoryPreparationMixin
 from diamond_dev.preflight import PreflightSummary, run_preflight
@@ -67,6 +77,7 @@ from diamond_dev.review_judgments import (
 )
 
 if TYPE_CHECKING:
+    from diamond_dev.config import DiamondDevConfig
     from diamond_dev.workflow import (
         ImplementationBranch,
         RunContext,
@@ -165,6 +176,165 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 phase_timings,
                 "complete initial agents",
                 lambda: self._run_initial_agents(active_context),
+            )
+            context = active_context
+            active_context = self._timed_phase(
+                phase_timings,
+                "prepare comparison",
+                lambda: self._run_comparison_judgment(active_context),
+            )
+            context = active_context
+            accepted_agent = self._timed_phase(
+                phase_timings,
+                "poll acceptance",
+                lambda: self._poll_acceptance(active_context),
+            )
+            selected_implementation = workflow.selected_implementation(
+                active_context,
+                accepted_agent,
+            )
+            selected = selected_implementation
+            active_context = self._timed_phase(
+                phase_timings,
+                "run comparison implementation",
+                lambda: self._run_comparison_fixer(
+                    active_context,
+                    selected_implementation,
+                    phase_warnings,
+                ),
+            )
+            context = active_context
+            self._timed_phase(
+                phase_timings,
+                "run review phases",
+                lambda: self._run_review_phases(
+                    active_context,
+                    selected_implementation,
+                    phase_warnings,
+                ),
+            )
+            active_context = self._timed_phase(
+                phase_timings,
+                "finalize pull request",
+                lambda: self._finalize_pr(
+                    active_context,
+                    selected_implementation,
+                    phase_warnings,
+                ),
+            )
+            context = active_context
+            status = "succeeded_with_warnings" if phase_warnings else "succeeded"
+        except (Exception,) as run_error:
+            error = str(run_error)
+            raise
+        else:
+            return 0
+        finally:
+            self._write_report(
+                RunReport(
+                    path=self.report_path,
+                    status=status,
+                    timing=RunReportTiming(
+                        started_at=started_at,
+                        finished_at=datetime.now(UTC),
+                        duration_seconds=time.perf_counter() - started_monotonic,
+                        phase_timings=phase_timings,
+                    ),
+                    workflow=RunReportWorkflow(
+                        context=context,
+                        selected=selected,
+                        preflight_summary=preflight_summary,
+                    ),
+                    command_logs=_command_log_records(self.runner),
+                    phase_warnings=phase_warnings,
+                    error=error,
+                ),
+            )
+
+    def run_commits(  # pylint: disable=too-many-locals
+        self,
+        commit_args: tuple[str, str],
+    ) -> int:
+        """Run the Diamond Dev workflow for two existing commits."""
+        started_at = datetime.now(UTC)
+        started_monotonic = time.perf_counter()
+        phase_timings: list[PhaseTiming] = []
+        context: RunContext | None = None
+        selected: SelectedImplementation | None = None
+        preflight_summary: PreflightSummary | None = None
+        phase_warnings: list[PhaseWarning] = []
+        status: RunStatus = "failed"
+        error: str | None = None
+
+        try:
+            config = self._timed_phase(
+                phase_timings,
+                "load config",
+                lambda: load_config(self.cwd, self.config_path),
+            )
+            preflight_summary = self._timed_phase(
+                phase_timings,
+                "preflight",
+                lambda: run_preflight(
+                    runner=self.runner,
+                    cwd=self.cwd,
+                    required_cli_names=_commit_pair_required_cli_names(config),
+                ),
+            )
+            resolved_inputs = self._timed_phase(
+                phase_timings,
+                "resolve commits",
+                lambda: resolve_commit_pair_inputs(
+                    cwd=self.cwd,
+                    repository_url=config.repository_url,
+                    runner=self.runner,
+                    commit_args=commit_args,
+                ),
+            )
+            wiki_url = config.wiki_repository_url or derive_wiki_repository_url(
+                config.repository_url,
+            )
+            wiki_dir = self.cwd / wiki_directory_name(wiki_url)
+            self._timed_phase(
+                phase_timings,
+                "prepare wiki",
+                lambda: self._ensure_wiki_repo_at(
+                    cwd=self.cwd,
+                    wiki_url=wiki_url,
+                    wiki_dir=wiki_dir,
+                ),
+            )
+            slug = self._timed_phase(
+                phase_timings,
+                "resolve commit slug",
+                lambda: choose_commit_pair_slug(
+                    cwd=self.cwd,
+                    wiki_dir=wiki_dir,
+                    runner=self.runner,
+                    resolved=resolved_inputs,
+                ),
+            )
+            labels = infer_commit_labels(*resolved_inputs)
+            entries = build_commit_pair_entries(
+                resolved=resolved_inputs,
+                labels=labels,
+                slug=slug,
+            )
+            active_context = self._timed_phase(
+                phase_timings,
+                "build context",
+                lambda: workflow.build_commit_pair_run_context(
+                    cwd=self.cwd,
+                    slug=slug,
+                    entries=entries,
+                    config=config,
+                ),
+            )
+            context = active_context
+            active_context = self._timed_phase(
+                phase_timings,
+                "prepare or resume implementation clones",
+                lambda: self._prepare_commit_pair_clones(active_context),
             )
             context = active_context
             active_context = self._timed_phase(
@@ -407,6 +577,31 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
     def _run_comparison_judgment(self, context: RunContext) -> RunContext:
         self.workflow_provider.sync_wiki(context.wiki.directory)
         if context.wiki.comparison_file.is_file():
+            wiki_comparison_markdown = context.wiki.comparison_file.read_text(
+                encoding="utf-8",
+            )
+            if not comparison_has_matching_commit_pair_marker(
+                wiki_comparison_markdown,
+                context,
+            ):
+                logger.warning(
+                    "Ignoring wiki comparison without matching commit-pair marker: {}",
+                    context.wiki.comparison_file,
+                )
+            else:
+                shutil.copy2(context.wiki.comparison_file, context.comparison_file)
+                if context.wiki.comparison_bundle_file.is_file():
+                    shutil.copy2(
+                        context.wiki.comparison_bundle_file,
+                        context.comparison_bundle_file,
+                    )
+                logger.info(
+                    "Using existing wiki comparison: {}",
+                    context.wiki.comparison_file,
+                )
+                return context
+
+        if context.wiki.comparison_file.is_file() and context.commit_pair is None:
             shutil.copy2(context.wiki.comparison_file, context.comparison_file)
             if context.wiki.comparison_bundle_file.is_file():
                 shutil.copy2(
@@ -420,6 +615,27 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             return context
 
         if context.comparison_file.is_file():
+            local_comparison_markdown = context.comparison_file.read_text(
+                encoding="utf-8",
+            )
+            if not comparison_has_matching_commit_pair_marker(
+                local_comparison_markdown,
+                context,
+            ):
+                logger.warning(
+                    "Ignoring local comparison without matching commit-pair marker: {}",
+                    context.comparison_file,
+                )
+                context.comparison_file.unlink()
+            else:
+                self._promote_local_comparison(context)
+                notify_url(
+                    context.config.notifications.comparison_url,
+                    label="comparison",
+                )
+                return context
+
+        if context.comparison_file.is_file() and context.commit_pair is None:
             self._promote_local_comparison(context)
             notify_url(context.config.notifications.comparison_url, label="comparison")
             return context
@@ -494,6 +710,7 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
 
     def _promote_local_comparison(self, context: RunContext) -> None:
         comparison_markdown = context.comparison_file.read_text(encoding="utf-8")
+        comparison_markdown = ensure_commit_pair_marker(comparison_markdown, context)
         context.comparison_file.write_text(
             ensure_acceptance_checkbox(
                 comparison_markdown,
@@ -509,6 +726,11 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
                 context.wiki.comparison_bundle_file,
             )
             paths.append(context.wiki.comparison_bundle_file.name)
+        if context.commit_pair is not None and upsert_commit_pair_index(
+            context.wiki.directory,
+            context.commit_pair,
+        ):
+            paths.append("diamond-dev-commit-comparisons.md")
         self.git.commit_if_changes(
             context.wiki.directory,
             message=f"Add {context.plan.slug} comparison",
@@ -978,7 +1200,11 @@ class DiamondDevOrchestrator(RepositoryPreparationMixin):
             log_name="final-push",
         )
 
-        pr_title = f"Implement {context.plan.path.stem}"
+        pr_title = (
+            f"Compare {selected.branch}"
+            if context.commit_pair is not None
+            else f"Implement {context.plan.path.stem}"
+        )
         pr_body = pr.build_pr_body(context, selected, warnings=phase_warnings)
         created_pr = self.workflow_provider.create_pull_request(
             selected,
@@ -1167,3 +1393,7 @@ def _command_log_records(runner: object) -> tuple[CommandLogRecord, ...]:
         for command_log in command_logs
         if isinstance(command_log, CommandLogRecord)
     )
+
+
+def _commit_pair_required_cli_names(config: DiamondDevConfig) -> tuple[str, ...]:
+    return tuple(dict.fromkeys((*config.required_cli_names(), "codex")))

@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from diamond_dev import workflow
 from diamond_dev.acceptance import acceptance_wait_delays
+from diamond_dev.commit_pair import ResolvedCommitInput
 from diamond_dev.config import DiamondDevConfig
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.executor import (
@@ -23,6 +25,7 @@ from diamond_dev.orchestrator import DiamondDevOrchestrator
 from diamond_dev.pr import build_pr_body
 from diamond_dev.report import PhaseWarning
 from diamond_dev.workflow import (
+    CommitPairEntry,
     DirtyRecord,
     ImplementationBranch,
     ImplementationContext,
@@ -647,6 +650,153 @@ def test_run_reports_warning_status_when_coderabbit_review_fails(
     assert "Workflow warnings:" in pr_body
     assert "CodeRabbit review (failed)" in pr_body
     assert "Codex review fixes (skipped)" in pr_body
+
+
+def test_run_commits_skips_initial_agents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".diamond-dev.toml").write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        'wiki_repository_url = "git@github.com:owner/repo.wiki.git"\n',
+        encoding="utf-8",
+    )
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(
+        cwd=tmp_path,
+        runner=runner,
+        sleep=lambda _seconds: None,
+    )
+    left = ResolvedCommitInput(
+        original_arg="abc123",
+        sha="a" * 40,
+        short_sha="aaaaaaaaaaaa",
+        message="Codex implementation",
+        ref_names=("codex/feature",),
+        explicit_branch="codex/feature",
+        source="remote",
+    )
+    right = ResolvedCommitInput(
+        original_arg="def456",
+        sha="b" * 40,
+        short_sha="bbbbbbbbbbbb",
+        message="Claude implementation",
+        ref_names=("claude/feature",),
+        explicit_branch="claude/feature",
+        source="remote",
+    )
+
+    monkeypatch.setattr(
+        "diamond_dev.preflight.shutil.which",
+        lambda cli_name: f"/usr/bin/{cli_name}",
+    )
+    monkeypatch.setattr(
+        "diamond_dev.orchestrator.resolve_commit_pair_inputs",
+        lambda **_kwargs: (left, right),
+    )
+    monkeypatch.setattr(
+        "diamond_dev.orchestrator.choose_commit_pair_slug",
+        lambda **_kwargs: "commit-compare",
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_ensure_wiki_repo_at",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_prepare_commit_pair_clones",
+        lambda context: context.with_implementation(
+            context.implementation.with_base_branch("main"),
+        ),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_initial_agents",
+        lambda _context: pytest.fail("initial agents should not run"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_comparison_judgment",
+        lambda context: context,
+    )
+    monkeypatch.setattr(orchestrator, "_poll_acceptance", lambda _context: "codex")
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_comparison_fixer",
+        lambda context, _selected, _warnings: context,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_review_phases",
+        lambda _context, _selected, _warnings: None,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_finalize_pr",
+        lambda context, _selected, _warnings: context.with_pr_url(
+            "https://github.com/owner/repo/pull/123",
+        ),
+    )
+
+    assert orchestrator.run_commits(("abc123", "def456")) == 0
+
+    report = json.loads((tmp_path / "logs" / "run-report.json").read_text())
+    assert report["context"]["mode"] == "commit_pair"
+    assert report["context"]["commit_pair"]["slug"] == "commit-compare"
+    assert "complete initial agents" not in {
+        phase["name"] for phase in report["phase_timings"]
+    }
+
+
+def test_finalize_pr_uses_selected_branch_title_for_commit_pair(
+    tmp_path: Path,
+) -> None:
+    entries = (
+        CommitPairEntry(
+            label="a",
+            original_arg="abc123",
+            sha="a" * 40,
+            short_sha="aaaaaaaaaaaa",
+            message="Left",
+            ref_names=(),
+            branch="diamond-dev/commit-compare/a",
+        ),
+        CommitPairEntry(
+            label="b",
+            original_arg="def456",
+            sha="b" * 40,
+            short_sha="bbbbbbbbbbbb",
+            message="Right",
+            ref_names=(),
+            branch="diamond-dev/commit-compare/b",
+        ),
+    )
+    context = workflow.build_commit_pair_run_context(
+        cwd=tmp_path,
+        slug="commit-compare",
+        entries=entries,
+        config=DiamondDevConfig(
+            config_path=tmp_path / ".diamond-dev.toml",
+            repository_url="git@github.com:owner/repo.git",
+        ),
+    )
+    context = context.with_implementation(
+        context.implementation.with_base_branch("main"),
+    )
+    selected = workflow.selected_implementation(context, "a")
+    selected.repo_dir.mkdir(parents=True)
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+
+    orchestrator._finalize_pr(context, selected, [])  # noqa: SLF001
+
+    pr_create = next(
+        command for command in runner.commands if command[:3] == ("gh", "pr", "create")
+    )
+    assert pr_create[pr_create.index("--title") + 1] == (
+        "Compare diamond-dev/commit-compare/a"
+    )
 
 
 def test_run_uses_configured_review_fixer_and_final_reviewer(

@@ -40,20 +40,35 @@ def parse_args(argv: Sequence[str] | None = None) -> Namespace:
     )
     parser.add_argument(
         "command_or_plan",
-        nargs="?",
-        help="Use `init` to generate config, or pass a markdown plan file to run.",
+        nargs="*",
+        help=(
+            "Use `init` to generate config, pass a markdown plan file to run, "
+            "or pass two commit-ish refs to compare."
+        ),
     )
     args = parser.parse_args(argv)
-    if args.command_or_plan is None:
+    positional_args = args.command_or_plan
+    if not positional_args:
         parser.error("the following arguments are required: plan_path or command")
-    if args.command_or_plan == "init":
+    if positional_args[0] == "init":
+        if len(positional_args) > 1:
+            parser.error("init does not accept positional arguments")
         args.command = "init"
         args.plan_path = None
+        args.commit_args = None
         return args
     if args.force:
         parser.error("--force is only supported with init")
+    if len(positional_args) == 2:
+        args.command = "compare-commits"
+        args.plan_path = None
+        args.commit_args = (positional_args[0], positional_args[1])
+        return args
+    if len(positional_args) > 2:
+        parser.error("expected a plan path or exactly two commit-ish refs")
     args.command = "run"
-    args.plan_path = Path(args.command_or_plan)
+    args.plan_path = Path(positional_args[0])
+    args.commit_args = None
     return args
 
 
@@ -66,6 +81,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "init":
             run_config_init(Path.cwd(), args.config, force=args.force)
             return 0
+        if args.command == "compare-commits":
+            return DiamondDevOrchestrator(config_path=args.config).run_commits(
+                args.commit_args,
+            )
         return DiamondDevOrchestrator(config_path=args.config).run(args.plan_path)
     except (DiamondDevError,) as error:
         logger.error("Diamond Dev failed: {}", error)
