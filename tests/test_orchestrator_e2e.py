@@ -6,13 +6,10 @@ import json
 import os
 import shlex
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytest
 from diamond_dev.executor import CommandRunner
 from diamond_dev.orchestrator import DiamondDevOrchestrator
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_orchestrator_e2e_happy_path_with_fake_clis(

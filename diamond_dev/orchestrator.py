@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import shutil
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -336,7 +336,7 @@ class DiamondDevOrchestrator(
         return active_context, selected_implementation
 
     @contextmanager
-    def _reported_run(self) -> Generator[_RunState]:
+    def _reported_run(self) -> Iterator[_RunState]:
         run_state = _RunState()
         try:
             yield run_state
