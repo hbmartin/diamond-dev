@@ -44,8 +44,9 @@ def parse_args(argv: Sequence[str] | None = None) -> Namespace:
         "command_or_plan",
         nargs="*",
         help=(
-            "Use `init` to generate config, pass a markdown plan file to run, "
-            "or pass two commit-ish refs to compare."
+            "Use `init` to generate config, use `doctor` to check local "
+            "readiness, pass a markdown plan file to run, or pass two "
+            "commit-ish refs to compare."
         ),
     )
     args = parser.parse_args(argv)
@@ -59,6 +60,15 @@ def parse_args(argv: Sequence[str] | None = None) -> Namespace:
         if len(positional_args) > 1:
             parser.error("init does not accept positional arguments")
         args.command = "init"
+        args.plan_path = None
+        args.commit_args = None
+        return args
+    if positional_args[0] == "doctor":
+        if len(positional_args) > 1:
+            parser.error("doctor does not accept positional arguments")
+        if args.force:
+            parser.error("--force is only supported with init")
+        args.command = "doctor"
         args.plan_path = None
         args.commit_args = None
         return args
@@ -86,6 +96,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "init":
             run_config_init(Path.cwd(), args.config, force=args.force)
             return 0
+        if args.command == "doctor":
+            return DiamondDevOrchestrator(config_path=args.config).doctor()
         if args.command == "compare-commits":
             return DiamondDevOrchestrator(config_path=args.config).run_commits(
                 args.commit_args,

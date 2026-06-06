@@ -77,6 +77,7 @@ def _prepare_e2e_workspace(
     calls_file = tmp_path / "fake-cli-calls.log"
     _write_fake_clis(fake_bin)
     monkeypatch.setenv("FAKE_CLI_CALLS", str(calls_file))
+    # The orchestrator clones fresh worktrees that do not inherit local git config.
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "fake@example.test")
     monkeypatch.setenv("GIT_AUTHOR_NAME", "Fake User")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "fake@example.test")
@@ -222,6 +223,13 @@ exit 1
     _write_executable(
         fake_bin / "gemini",
         """#!/bin/sh
+case "$*" in
+  *"Diamond Dev doctor authentication check"*)
+    _fake_record gemini-auth
+    printf 'OK\\n'
+    exit 0
+    ;;
+esac
 _fake_record gemini
 cat > comparison.md <<'EOF'
 Fake comparison
@@ -232,6 +240,11 @@ EOF
     _write_executable(
         fake_bin / "coderabbit",
         """#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  _fake_record coderabbit-auth
+  printf '{"authenticated":true}\\n'
+  exit 0
+fi
 _fake_record coderabbit
 printf 'Review\\n(A) Fix accepted item.\\n'
 """,
@@ -239,6 +252,11 @@ printf 'Review\\n(A) Fix accepted item.\\n'
     _write_executable(
         fake_bin / "codex",
         """#!/bin/sh
+if [ "$1" = "login" ] && [ "$2" = "status" ]; then
+  _fake_record codex-auth
+  printf 'Logged in\\n'
+  exit 0
+fi
 _fake_record codex
 repo=
 previous=
@@ -293,6 +311,11 @@ esac
     _write_executable(
         fake_bin / "claude",
         """#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  _fake_record claude-auth
+  printf 'Authenticated\\n'
+  exit 0
+fi
 _fake_record claude
 case "$*" in
   *"/review "*)

@@ -178,7 +178,7 @@ class _ScriptedRunner(CommandRunner):
                 output = "origin/main\n"
             case ("git", "rev-parse", *_):
                 output = "abc123\n"
-            case ("git", "ls-remote", *_):
+            case ("git", "ls-remote", "--exit-code", *_):
                 returncode = 2
             case ("git", "rev-list", "--left-right", "--count", *_):
                 output = "0\t0\n"
@@ -202,7 +202,11 @@ class _ScriptedRunner(CommandRunner):
             case ("gh", "pr", "list", *_):
                 output = "[]"
             case ("gemini", *_):
-                (cwd / "comparison.md").write_text("Comparison\n", encoding="utf-8")
+                if log_name != "doctor-agent-gemini-auth":
+                    (cwd / "comparison.md").write_text(
+                        "Comparison\n",
+                        encoding="utf-8",
+                    )
             case ("gh", "pr", "create", *_):
                 output = "https://github.com/owner/repo/pull/123\n"
 
