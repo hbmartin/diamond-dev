@@ -270,6 +270,38 @@ def test_resolve_commit_pair_inputs_normalizes_file_origin_url(
     assert right.sha == local_sha
 
 
+@pytest.mark.parametrize(
+    ("origin_url", "repository_url"),
+    [
+        (
+            "git@github.com:owner/repo.git",
+            "github.com:owner/repo.git",
+        ),
+        (
+            "git://github.com:9418/owner/repo.git",
+            "git://github.com/owner/repo.git",
+        ),
+    ],
+)
+def test_resolve_commit_pair_inputs_normalizes_origin_url_variants(
+    tmp_path: Path,
+    origin_url: str,
+    repository_url: str,
+) -> None:
+    runner = _LocalFallbackRunner(origin_url=origin_url)
+
+    left, right = resolve_commit_pair_inputs(
+        cwd=tmp_path,
+        repository_url=repository_url,
+        runner=runner,  # type: ignore[arg-type]
+        commit_args=("remote-commit", "local-commit"),
+    )
+
+    assert left.source == "remote"
+    assert right.source == "local"
+    assert right.sha == runner.local_sha
+
+
 def test_resolve_commit_pair_inputs_handles_empty_resolved_ref_output(
     tmp_path: Path,
 ) -> None:
@@ -519,3 +551,57 @@ class _EmptyShortShaRunner:
             log_path=cwd / f"{log_name}.log",
             output=output,
         )
+
+
+class _LocalFallbackRunner:
+    remote_sha = "a" * 40
+    local_sha = "b" * 40
+
+    def __init__(self, *, origin_url: str) -> None:
+        self.origin_url = origin_url
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        assert isinstance(check, bool)
+        command_tuple = tuple(command)
+        returncode, output = self._result_for(log_name)
+        return CommandResult(
+            command=command_tuple,
+            cwd=cwd,
+            returncode=returncode,
+            log_path=cwd / f"{log_name}.log",
+            output=output,
+        )
+
+    def _result_for(self, log_name: str) -> tuple[int, str]:
+        returncode = 0
+        output = ""
+        if log_name == "commit-local-origin-url":
+            output = self.origin_url
+        elif log_name == "commit-1-remote-resolve-remote-commit":
+            output = self.remote_sha
+        elif log_name.startswith("commit-2-remote-resolve-"):
+            returncode = 1
+        elif log_name == "commit-2-local-fetch-head":
+            output = self.local_sha
+        elif log_name.endswith("-short-sha"):
+            output = _sha_for_log(log_name, self.remote_sha, self.local_sha)[:12]
+        elif log_name.endswith("-message"):
+            output = f"{log_name} message\n"
+        elif "containing" in log_name:
+            output = "main\n"
+        elif "explicit-branch" in log_name:
+            returncode = 1
+        return returncode, output
+
+
+def _sha_for_log(log_name: str, remote_sha: str, local_sha: str) -> str:
+    if log_name.startswith("commit-1-"):
+        return remote_sha
+    return local_sha

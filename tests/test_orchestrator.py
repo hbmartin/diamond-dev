@@ -671,6 +671,47 @@ def test_run_reports_failed_phase_when_setup_fails(tmp_path: Path) -> None:
     assert "Plan file not found" in report["phase_timings"][0]["error"]
 
 
+def test_timed_phase_records_command_failure_log_path(tmp_path: Path) -> None:
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    phase_timings = []
+    command_log_path = tmp_path / "logs" / "failed-command.log"
+
+    def fail_command() -> None:
+        raise CommandFailureError(
+            command="git status",
+            cwd=str(tmp_path),
+            returncode=1,
+            log_path=str(command_log_path),
+        )
+
+    with pytest.raises(CommandFailureError):
+        orchestrator._timed_phase(  # noqa: SLF001
+            phase_timings,
+            "failed command",
+            fail_command,
+        )
+
+    assert phase_timings[0].log_path == str(command_log_path)
+
+
+def test_timed_phase_records_keyboard_interrupt(tmp_path: Path) -> None:
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    phase_timings = []
+
+    def interrupt() -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        orchestrator._timed_phase(  # noqa: SLF001
+            phase_timings,
+            "interruptible phase",
+            interrupt,
+        )
+
+    assert phase_timings[0].status == "failed"
+    assert phase_timings[0].error == "Interrupted by user"
+
+
 def test_run_commits_skips_initial_agents(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1879,6 +1920,26 @@ def test_poll_acceptance_skips_missing_wiki_comparison_file(
         + 1
     )
     assert sleep_calls == [2, 2, 1]
+
+
+def test_poll_acceptance_reraises_keyboard_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+
+    def interrupt_sleep(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    orchestrator = DiamondDevOrchestrator(
+        cwd=tmp_path,
+        runner=_RecordingRunner(),
+        sleep=interrupt_sleep,
+    )
+    monkeypatch.setattr(orchestrator.git, "sync_wiki", lambda _wiki_dir: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        orchestrator._poll_acceptance(context)  # noqa: SLF001
 
 
 def test_commit_if_changes_skips_missing_untracked_paths(tmp_path: Path) -> None:

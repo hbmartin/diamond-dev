@@ -35,10 +35,7 @@ class AcceptancePollingMixin:
                 delay_seconds,
                 attempt_number,
             )
-            try:
-                self.sleep(delay_seconds)
-            except (KeyboardInterrupt,) as error:
-                raise DiamondDevError("Acceptance polling interrupted") from error
+            self.sleep(delay_seconds)
             if accepted_agent := self._check_acceptance_once(context):
                 return accepted_agent
 

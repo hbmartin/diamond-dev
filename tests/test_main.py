@@ -122,3 +122,17 @@ def test_main_dispatches_commit_pair(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert main_module.main(["--config", "custom.toml", "abc123", "def456"]) == 0
     assert calls == [("abc123", "def456")]
+
+
+def test_main_returns_interrupt_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeOrchestrator:
+        def __init__(self, *, config_path: Path | None = None) -> None:
+            assert config_path is None
+
+        def run(self, plan_path: Path) -> int:
+            assert plan_path == Path("plan.md")
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(main_module, "DiamondDevOrchestrator", FakeOrchestrator)
+
+    assert main_module.main(["plan.md"]) == 130
