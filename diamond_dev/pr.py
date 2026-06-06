@@ -81,6 +81,7 @@ def build_pr_body(
     body_lines = [
         "Automated diamond-dev implementation.",
         "",
+        f"- Mode: {'commit-pair' if context.commit_pair is not None else 'plan'}",
         f"- Accepted implementation: {selected.accepted_agent}",
         f"- Comparison fixer: {selected.comparison_fixer}",
         f"- Selected branch: {selected.branch}",
@@ -93,6 +94,15 @@ def build_pr_body(
         f"- {branch.agent_name}: {branch.branch}"
         for branch in context.implementation.branches
     )
+    if context.commit_pair is not None:
+        body_lines.extend(("", "Compared commits:"))
+        body_lines.extend(
+            (
+                f"- {entry.label}: {entry.short_sha} ({entry.source}) "
+                f"from `{entry.original_arg}` on `{entry.branch}`"
+                for entry in context.commit_pair.entries
+            ),
+        )
     body_lines.extend(("", "Workflow roles:"))
     body_lines.extend(_workflow_role_lines(context))
     if context.dirty_records:

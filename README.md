@@ -145,6 +145,26 @@ diamond-dev path/to/my-plan.md
 The command must be run from a directory containing `.diamond-dev.toml` (or pass
 `--config`). It takes a path to a `.md` plan file.
 
+To compare two existing commits instead of starting from a plan, pass exactly two
+commit-ish refs:
+
+```bash
+diamond-dev abc123 def456
+diamond-dev codex/feature claude/feature
+```
+
+Two-commit mode accepts SHAs, short SHAs, branches, tags, and remote refs. It
+skips the initial implementation agents, builds the comparison bundle for those
+two inputs, writes the comparison page to the wiki, waits for the same
+acceptance checkbox, applies follow-up changes to the accepted branch, runs
+review, and opens a PR. The PR title is `Compare <selected branch>`.
+
+The two commits are resolved from `repository_url` first. If a commit is
+local-only, `diamond-dev` fetches it from the invocation repository only when
+that repository's `origin` URL exactly matches `repository_url`; otherwise the
+run fails before comparison. The two arguments must resolve to different full
+SHAs.
+
 To create a starter config interactively:
 
 ```bash
@@ -304,6 +324,21 @@ default implementers it creates:
 For custom implementers, generated implementation clones and branches use the
 same pattern: `<agent-name>-my-plan` on branch `<agent-name>/my-plan`.
 
+In two-commit mode, `diamond-dev` syncs the wiki and searches
+`diamond-dev-commit-comparisons.md` plus hidden comparison-page markers for the
+ordered SHA pair. If no stored slug exists, Codex is asked to generate a concise
+branch-style name from the two commit messages; the result is normalized with
+the same slug rules as plan filenames. If naming fails, the fallback slug is
+`compare-<short-a>-vs-<short-b>`. If the slug collides with another comparison,
+the short SHA pair is appended.
+
+Two-commit clone directories use `<label>-<slug>`, where labels are inferred
+from commit messages first, then branch/ref names. `codex` and `claude` labels
+are inferred as a pair when possible; otherwise labels fall back to `a` and `b`.
+When an input is an existing branch/ref, that branch is used. If a SHA maps to a
+single containing branch, that branch is used. Ambiguous or unbranched SHAs use
+generated branches named `diamond-dev/<slug>/<label>`.
+
 The wiki clone is reused if present and synchronized with fast-forward-only
 pulls. On a fresh run, `diamond-dev` clones the implementation repository once,
 makes a preserving local copy for the second agent, then checks out each
@@ -349,6 +384,8 @@ Artifact resume rules:
 - If the wiki comparison page exists, it overwrites local `comparison.md`.
 - If only local `comparison.md` exists, it is promoted to the wiki with the
   acceptance checkbox added when missing.
+- In two-commit mode, local `comparison.md` is reused only when it contains the
+  matching ordered commit-pair marker; otherwise it is regenerated.
 - The comparison bundle is reused or promoted alongside the comparison page when
   present.
 - If only a local review file exists, it is promoted to the wiki.

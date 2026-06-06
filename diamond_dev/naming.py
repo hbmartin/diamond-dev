@@ -22,10 +22,15 @@ _GIT_URL_SCHEMES: Final = frozenset({"file", "git", "http", "https", "ssh"})
 
 def slug_for_plan(plan_path: Path) -> str:
     """Return a stable slug from a markdown plan filename stem."""
-    slug = _SLUG_PATTERN.sub("-", plan_path.stem.lower()).strip("-")
+    slug = slugify(plan_path.stem)
     if not slug:
         raise UrlDerivationError(f"Could not derive a slug from {plan_path.name}")
     return slug
+
+
+def slugify(value: str) -> str:
+    """Return a lowercase ASCII-ish slug from a free-form value."""
+    return _SLUG_PATTERN.sub("-", value.lower()).strip("-")
 
 
 def repository_name_from_url(repository_url: str) -> str:

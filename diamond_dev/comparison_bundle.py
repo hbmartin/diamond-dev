@@ -42,7 +42,7 @@ def write_comparison_bundle(
     lines = [
         "# Diamond Dev comparison bundle",
         "",
-        f"- Plan: {context.plan.file_name}",
+        *_run_identity_lines(context),
         f"- Base branch: {context.implementation.base_branch}",
         f"- Diff byte budget: {context.config.comparison.max_total_diff_bytes}",
         f"- Per-file diff byte cap: {context.config.comparison.max_file_diff_bytes}",
@@ -70,6 +70,25 @@ def write_comparison_bundle(
     context.comparison_bundle_file.write_text(f"{bundle_markdown}\n", encoding="utf-8")
     logger.info("Wrote comparison bundle: {}", context.comparison_bundle_file)
     return active_context
+
+
+def _run_identity_lines(context: RunContext) -> list[str]:
+    if context.commit_pair is None:
+        return [f"- Plan: {context.plan.file_name}"]
+
+    left, right = context.commit_pair.entries
+    return [
+        "- Mode: commit-pair",
+        f"- Slug: {context.commit_pair.slug}",
+        f"- Left arg: {left.original_arg}",
+        f"- Left label: {left.label}",
+        f"- Left SHA: {left.sha}",
+        f"- Left message: {left.message}",
+        f"- Right arg: {right.original_arg}",
+        f"- Right label: {right.label}",
+        f"- Right SHA: {right.sha}",
+        f"- Right message: {right.message}",
+    ]
 
 
 def _branch_section(
