@@ -218,6 +218,33 @@ def _preflight_payload(
             for cli_check in preflight_summary.cli_checks
         ],
         "gh_auth_log_path": str(preflight_summary.gh_auth_log_path),
+        "agent_auth_checks": [
+            {
+                "agent_name": agent_auth_check.agent_name,
+                "adapter_name": agent_auth_check.adapter_name,
+                "command": list(agent_auth_check.command),
+                "log_path": str(agent_auth_check.log_path),
+            }
+            for agent_auth_check in preflight_summary.agent_auth_checks
+        ],
+        "wiki_access_check": (
+            {
+                "url": preflight_summary.wiki_access_check.url,
+                "directory": str(preflight_summary.wiki_access_check.directory),
+                "read_log_path": str(
+                    preflight_summary.wiki_access_check.read_log_path,
+                ),
+                "push_log_path": str(
+                    preflight_summary.wiki_access_check.push_log_path,
+                ),
+            }
+            if preflight_summary.wiki_access_check is not None
+            else None
+        ),
+        "write_permission_checks": [
+            {"label": write_check.label, "path": str(write_check.path)}
+            for write_check in preflight_summary.write_permission_checks
+        ],
     }
 
 

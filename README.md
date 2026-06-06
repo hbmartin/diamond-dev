@@ -81,10 +81,11 @@ flowchart TD
   - `uv` — for `uv.lock` (`uv sync --locked`)
   - `pnpm` — for `pnpm-lock.yaml` (`pnpm install --frozen-lockfile`)
 
-Before cloning or launching agents, `diamond-dev` runs a fast preflight that
-checks the configured commands are available on `PATH` and verifies
-`gh auth status`. When you use custom agents, only the CLIs for the adapters you
-configure are required.
+Before cloning or launching agents, `diamond-dev` runs doctor-grade preflight
+checks that verify the configured commands are available on `PATH`, GitHub auth
+works, each configured agent adapter is logged in, local workspace and wiki
+directories are writable, and the wiki remote accepts a dry-run push. When you
+use custom agents, only the CLIs for the adapters you configure are required.
 
 ## Installation
 
@@ -112,10 +113,13 @@ uv run diamond-dev --version
 # 1. Generate a starter config in your working directory.
 diamond-dev init
 
-# 2. Write a plan describing the change you want.
+# 2. Check CLI auth, wiki push access, and local write permissions.
+diamond-dev doctor
+
+# 3. Write a plan describing the change you want.
 $EDITOR my-plan.md
 
-# 3. Run the workflow.
+# 4. Run the workflow.
 diamond-dev my-plan.md
 ```
 
@@ -183,6 +187,18 @@ Useful flags:
   invocation directory. With `init`, this selects the config file to write.
 - `--force`: With `init`, overwrite an existing config file without asking.
 - `--version`: Show the installed `diamond-dev` version.
+
+To run readiness checks without starting a workflow:
+
+```bash
+diamond-dev doctor
+diamond-dev --config custom.toml doctor
+```
+
+`doctor` runs the same startup checks used by workflow preflight. Codex, Claude,
+and CodeRabbit use their auth status commands. Gemini does not expose a status
+command, so `doctor` sends a tiny headless prompt to validate Gemini auth before
+long-running agents start.
 
 ## Configuration
 

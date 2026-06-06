@@ -36,6 +36,15 @@ def test_parse_args_accepts_init_command() -> None:
     assert not args.force
 
 
+def test_parse_args_accepts_doctor_command() -> None:
+    args = parse_args(["doctor"])
+
+    assert args.command == "doctor"
+    assert args.config is None
+    assert args.plan_path is None
+    assert args.commit_args is None
+
+
 def test_parse_args_accepts_init_config_after_command() -> None:
     args = parse_args(["init", "--config", "custom.toml"])
 
@@ -67,6 +76,13 @@ def test_parse_args_rejects_force_for_run() -> None:
 def test_parse_args_rejects_invalid_positional_arity() -> None:
     with pytest.raises(SystemExit) as exit_info:
         parse_args(["one", "two", "three"])
+
+    assert exit_info.value.code == 2
+
+
+def test_parse_args_rejects_doctor_positional_args() -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        parse_args(["doctor", "plan.md"])
 
     assert exit_info.value.code == 2
 
@@ -123,6 +139,22 @@ def test_main_dispatches_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
     assert main_module.main(["init", "--config", "custom.toml", "--force"]) == 0
     assert calls == [(tmp_path, Path("custom.toml"), True)]
+
+
+def test_main_dispatches_doctor(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Path | None] = []
+
+    class FakeOrchestrator:
+        def __init__(self, *, config_path: Path | None = None) -> None:
+            calls.append(config_path)
+
+        def doctor(self) -> int:
+            return 0
+
+    monkeypatch.setattr(main_module, "DiamondDevOrchestrator", FakeOrchestrator)
+
+    assert main_module.main(["--config", "custom.toml", "doctor"]) == 0
+    assert calls == [Path("custom.toml")]
 
 
 def test_main_dispatches_commit_pair(monkeypatch: pytest.MonkeyPatch) -> None:

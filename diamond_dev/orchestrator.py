@@ -49,7 +49,7 @@ from diamond_dev.orchestrator_comparison import ComparisonPhasesMixin
 from diamond_dev.orchestrator_pull_request import PullRequestFinalizationMixin
 from diamond_dev.orchestrator_repositories import RepositoryPreparationMixin
 from diamond_dev.orchestrator_review import ReviewPhasesMixin
-from diamond_dev.preflight import PreflightSummary, run_preflight
+from diamond_dev.preflight import PreflightSummary, run_doctor, run_preflight
 from diamond_dev.providers import GitHubWorkflowProvider, ReviewProvider
 from diamond_dev.report import (
     PhaseTiming,
@@ -157,7 +157,9 @@ class DiamondDevOrchestrator(
                 lambda: run_preflight(
                     runner=self.runner,
                     cwd=self.cwd,
+                    config=active_context.config,
                     required_cli_names=active_context.config.required_cli_names(),
+                    wiki_dir=active_context.wiki.directory,
                 ),
             )
             self._timed_phase(
@@ -203,6 +205,7 @@ class DiamondDevOrchestrator(
                 lambda: run_preflight(
                     runner=self.runner,
                     cwd=self.cwd,
+                    config=config,
                     required_cli_names=_commit_pair_required_cli_names(config),
                 ),
             )
@@ -269,6 +272,17 @@ class DiamondDevOrchestrator(
             )
             run_state.context = active_context
             run_state.selected = selected_implementation
+        return 0
+
+    def doctor(self) -> int:
+        """Run environment health checks without starting a workflow."""
+        config = load_config(self.cwd, self.config_path)
+        run_doctor(
+            runner=self.runner,
+            cwd=self.cwd,
+            config=config,
+            required_cli_names=config.required_cli_names(),
+        )
         return 0
 
     def _run_pipeline(
