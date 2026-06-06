@@ -723,6 +723,25 @@ def test_timed_phase_ignores_suppressed_context_log_path(tmp_path: Path) -> None
     assert phase_timings[0].log_path is None
 
 
+def test_timed_phase_stops_at_cyclic_exception_context(tmp_path: Path) -> None:
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    phase_timings = []
+
+    def fail_with_cyclic_context() -> None:
+        error = DiamondDevError("cyclic failure")
+        error.__context__ = error
+        raise error
+
+    with pytest.raises(DiamondDevError, match="cyclic failure"):
+        orchestrator._timed_phase(  # noqa: SLF001
+            phase_timings,
+            "cyclic failure",
+            fail_with_cyclic_context,
+        )
+
+    assert phase_timings[0].log_path is None
+
+
 def test_timed_phase_records_keyboard_interrupt(tmp_path: Path) -> None:
     orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
     phase_timings = []
@@ -1927,7 +1946,7 @@ def test_poll_acceptance_skips_missing_wiki_comparison_file(
     orchestrator = DiamondDevOrchestrator(
         cwd=tmp_path,
         runner=runner,
-        sleep=lambda seconds: sleep_calls.append(seconds),
+        sleep=sleep_calls.append,
     )
     sync_calls: list[Path] = []
 

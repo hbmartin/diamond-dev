@@ -6,11 +6,13 @@ import json
 import os
 import shlex
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from diamond_dev.executor import CommandRunner
 from diamond_dev.orchestrator import DiamondDevOrchestrator
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_orchestrator_e2e_happy_path_with_fake_clis(
@@ -75,6 +77,10 @@ def _prepare_e2e_workspace(
     calls_file = tmp_path / "fake-cli-calls.log"
     _write_fake_clis(fake_bin)
     monkeypatch.setenv("FAKE_CLI_CALLS", str(calls_file))
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "fake@example.test")
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Fake User")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "fake@example.test")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "Fake User")
     monkeypatch.setenv(
         "PATH",
         f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
