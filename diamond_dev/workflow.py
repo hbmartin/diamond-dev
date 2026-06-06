@@ -60,15 +60,23 @@ class PlanContext:
 
 
 @dataclass(frozen=True, slots=True)
-class CommitPairEntry:
-    """Resolved metadata for one commit-pair comparison input."""
+class CommitMetadata:
+    """Shared commit identity metadata for commit-pair workflows."""
 
-    label: str
     original_arg: str
     sha: str
     short_sha: str
     message: str
     ref_names: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CommitPairEntry(CommitMetadata):
+    """Resolved metadata for one commit-pair comparison input."""
+
+    # pylint: disable=too-many-instance-attributes
+
+    label: str
     branch: str
     source: str = "remote"
 
@@ -191,6 +199,8 @@ class ImplementationContext:
 class RunContext:
     """Resolved state for one Diamond Dev run."""
 
+    # pylint: disable=too-many-instance-attributes
+
     cwd: Path
     config: DiamondDevConfig
     plan: PlanContext
@@ -221,6 +231,34 @@ class RunContext:
     ) -> RunContext:
         """Return a copy with updated implementation repository details."""
         return replace(self, implementation=implementation)
+
+    def with_commit_pair_entries(
+        self,
+        entries: tuple[CommitPairEntry, CommitPairEntry],
+    ) -> RunContext:
+        """Return a copy with commit-pair and implementation branches synchronized."""
+        if self.commit_pair is None:
+            raise DiamondDevError("Cannot set commit-pair entries for a plan run")
+        if len(entries) != len(self.implementation.branches):
+            raise DiamondDevError(
+                "Commit-pair entries must match implementation branches",
+            )
+        implementation = replace(
+            self.implementation,
+            branches=tuple(
+                replace(branch, branch=entry.branch)
+                for branch, entry in zip(
+                    self.implementation.branches,
+                    entries,
+                    strict=True,
+                )
+            ),
+        )
+        return replace(
+            self,
+            commit_pair=replace(self.commit_pair, entries=entries),
+            implementation=implementation,
+        )
 
     def with_dirty_record(self, dirty_record: DirtyRecord) -> RunContext:
         """Return a copy with an added dirty-file record."""

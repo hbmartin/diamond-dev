@@ -9,6 +9,8 @@ from typing import Final
 from diamond_dev.errors import MalformedAcceptanceError
 
 DEFAULT_ACCEPTANCE_AGENTS: Final = ("codex", "claude")
+DEFAULT_ACCEPTANCE_POLL_INTERVAL_SECONDS: Final = 120
+DEFAULT_ACCEPTANCE_MAX_WAIT_SECONDS: Final = 4_620
 ACCEPTANCE_CHECKBOX: Final = "- [ ] Accept: (codex/claude)"
 _ACCEPTANCE_LINE_PATTERN: Final = re.compile(r"^- \[[ xX]\] Accept:")
 
@@ -66,9 +68,24 @@ def accepted_line(agent_name: str) -> str:
     return f"- [x] Accept: {agent_name}"
 
 
-def acceptance_wait_delays() -> tuple[int, ...]:
+def acceptance_wait_delays(
+    *,
+    poll_interval_seconds: int = DEFAULT_ACCEPTANCE_POLL_INTERVAL_SECONDS,
+    max_wait_seconds: int = DEFAULT_ACCEPTANCE_MAX_WAIT_SECONDS,
+) -> tuple[int, ...]:
     """Return acceptance polling waits in seconds."""
-    return (120, *(minutes * 60 for minutes in range(3, 13)))
+    if poll_interval_seconds <= 0:
+        raise ValueError("poll_interval_seconds must be positive")
+    if max_wait_seconds <= 0:
+        raise ValueError("max_wait_seconds must be positive")
+
+    delays: list[int] = []
+    remaining_seconds = max_wait_seconds
+    while remaining_seconds > 0:
+        delay_seconds = min(poll_interval_seconds, remaining_seconds)
+        delays.append(delay_seconds)
+        remaining_seconds -= delay_seconds
+    return tuple(delays)
 
 
 def _acceptance_lines(markdown: str) -> list[str]:

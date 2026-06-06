@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+from diamond_dev.acceptance import (
+    DEFAULT_ACCEPTANCE_MAX_WAIT_SECONDS,
+    DEFAULT_ACCEPTANCE_POLL_INTERVAL_SECONDS,
+)
 from diamond_dev.agents import (
     AgentAdapter,
     AgentCapability,
@@ -37,6 +41,14 @@ class NotificationConfig:
     comparison_implementation_url: str | None = None
     review_input_needed_url: str | None = None
     open_pr_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptanceConfig:
+    """Acceptance polling settings."""
+
+    poll_interval_seconds: int = DEFAULT_ACCEPTANCE_POLL_INTERVAL_SECONDS
+    max_wait_seconds: int = DEFAULT_ACCEPTANCE_MAX_WAIT_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +222,7 @@ class DiamondDevConfig:
     agents: AgentConfigs = field(default_factory=AgentConfigs)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
     comparison: ComparisonConfig = ComparisonConfig()
+    acceptance: AcceptanceConfig = AcceptanceConfig()
 
     @property
     def config_dir(self) -> Path:
@@ -298,6 +311,7 @@ def load_config(cwd: Path, config_path: Path | None = None) -> DiamondDevConfig:
         agents=agents,
         workflow=workflow,
         comparison=_load_comparison(raw_config, resolved_config_path),
+        acceptance=_load_acceptance(raw_config, resolved_config_path),
     )
 
 
@@ -651,6 +665,24 @@ def _load_comparison(raw_config: dict[str, Any], config_path: Path) -> Compariso
             "max_test_output_bytes",
             "`comparison.max_test_output_bytes`",
         ) or DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES,
+    )
+
+
+def _load_acceptance(raw_config: dict[str, Any], config_path: Path) -> AcceptanceConfig:
+    acceptance = _optional_table(raw_config, "acceptance", config_path)
+    return AcceptanceConfig(
+        poll_interval_seconds=_optional_positive_int(
+            acceptance,
+            "poll_interval_seconds",
+            "`acceptance.poll_interval_seconds`",
+        )
+        or DEFAULT_ACCEPTANCE_POLL_INTERVAL_SECONDS,
+        max_wait_seconds=_optional_positive_int(
+            acceptance,
+            "max_wait_seconds",
+            "`acceptance.max_wait_seconds`",
+        )
+        or DEFAULT_ACCEPTANCE_MAX_WAIT_SECONDS,
     )
 
 

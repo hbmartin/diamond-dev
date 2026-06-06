@@ -59,6 +59,8 @@ def test_load_config_reads_required_and_optional_values(tmp_path: Path) -> None:
     assert config.comparison.max_total_diff_bytes == 200_000
     assert config.comparison.max_file_diff_bytes == 40_000
     assert config.comparison.max_test_output_bytes == 20_000
+    assert config.acceptance.poll_interval_seconds == 120
+    assert config.acceptance.max_wait_seconds == 4_620
 
 
 def test_load_config_reads_config_tables(tmp_path: Path) -> None:
@@ -93,7 +95,10 @@ def test_load_config_reads_config_tables(tmp_path: Path) -> None:
         'test_commands = ["uv run pytest tests/unit"]\n'
         "max_total_diff_bytes = 1000\n"
         "max_file_diff_bytes = 200\n"
-        "max_test_output_bytes = 300",
+        "max_test_output_bytes = 300\n"
+        "[acceptance]\n"
+        "poll_interval_seconds = 5\n"
+        "max_wait_seconds = 15",
         encoding="utf-8",
     )
 
@@ -118,6 +123,8 @@ def test_load_config_reads_config_tables(tmp_path: Path) -> None:
     assert config.comparison.max_total_diff_bytes == 1000
     assert config.comparison.max_file_diff_bytes == 200
     assert config.comparison.max_test_output_bytes == 300
+    assert config.acceptance.poll_interval_seconds == 5
+    assert config.acceptance.max_wait_seconds == 15
 
 
 def test_load_config_reads_workflow_and_named_agent_alias(tmp_path: Path) -> None:
@@ -306,6 +313,7 @@ def test_load_config_rejects_legacy_table_conflicts(
         'repository_url = "git@github.com:owner/repo.git"\nprompts = "bad"',
         'repository_url = "git@github.com:owner/repo.git"\nagents = "bad"',
         'repository_url = "git@github.com:owner/repo.git"\ncomparison = "bad"',
+        'repository_url = "git@github.com:owner/repo.git"\nacceptance = "bad"',
         (
             'repository_url = "git@github.com:owner/repo.git"\n'
             "[agents]\n"
@@ -350,6 +358,31 @@ def test_load_config_rejects_bad_comparison_values(
     (tmp_path / CONFIG_FILE_NAME).write_text(config_text, encoding="utf-8")
 
     with pytest.raises(ConfigError):
+        load_config(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[acceptance]\n"
+            "poll_interval_seconds = 0"
+        ),
+        (
+            'repository_url = "git@github.com:owner/repo.git"\n'
+            "[acceptance]\n"
+            "max_wait_seconds = -1"
+        ),
+    ],
+)
+def test_load_config_rejects_bad_acceptance_values(
+    tmp_path: Path,
+    config_text: str,
+) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(config_text, encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="acceptance"):
         load_config(tmp_path)
 
 

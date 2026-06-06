@@ -10,6 +10,8 @@ from diamond_dev.config import ComparisonConfig, DiamondDevConfig
 from diamond_dev.executor import CommandResult
 from diamond_dev.git_ops import BranchAheadBehind
 from diamond_dev.workflow import (
+    CommitPairContext,
+    CommitPairEntry,
     DirtyRecord,
     ImplementationBranch,
     ImplementationContext,
@@ -138,6 +140,55 @@ def test_comparison_bundle_records_two_branches_without_tests(
     assert "- Change stats: deleted=1, renamed=1" in bundle
     assert "- tests: not_run" in bundle
     assert "old.py -> new.py" in bundle
+
+
+def test_comparison_bundle_uses_commit_subjects_for_pair_identity(
+    tmp_path: Path,
+) -> None:
+    context = _context(
+        tmp_path,
+        commit_pair=CommitPairContext(
+            slug="my-plan",
+            entries=(
+                CommitPairEntry(
+                    original_arg="left",
+                    sha="a" * 40,
+                    short_sha="aaaaaaaaaaaa",
+                    message="Left subject\n\nLeft body",
+                    ref_names=(),
+                    label="codex",
+                    branch="codex/my-plan",
+                ),
+                CommitPairEntry(
+                    original_arg="right",
+                    sha="b" * 40,
+                    short_sha="bbbbbbbbbbbb",
+                    message="Right subject\n\nRight body",
+                    ref_names=(),
+                    label="claude",
+                    branch="claude/my-plan",
+                ),
+            ),
+        ),
+    )
+    runner = _FakeRunner(tmp_path)
+    git = _FakeGit(tmp_path)
+    git.name_status = {
+        "codex-my-plan": "",
+        "claude-my-plan": "",
+    }
+
+    write_comparison_bundle(
+        context=context,
+        runner=runner,  # type: ignore[arg-type]
+        git=git,  # type: ignore[arg-type]
+    )
+
+    bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
+    assert "- Left message: Left subject" in bundle
+    assert "- Right message: Right subject" in bundle
+    assert "Left body" not in bundle
+    assert "Right body" not in bundle
 
 
 def test_comparison_bundle_records_configured_test_results_and_dirty_files(
@@ -299,6 +350,7 @@ def _context(
     tmp_path: Path,
     *,
     comparison: ComparisonConfig | None = None,
+    commit_pair: CommitPairContext | None = None,
 ) -> RunContext:
     comparison_config = comparison if comparison is not None else ComparisonConfig()
     return RunContext(
@@ -341,4 +393,5 @@ def _context(
             ),
             base_branch="main",
         ),
+        commit_pair=commit_pair,
     )

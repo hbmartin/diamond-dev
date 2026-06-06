@@ -79,6 +79,46 @@ def test_build_commit_pair_entries_generates_branch_for_ambiguous_refs() -> None
     assert entries[1].branch == "diamond-dev/my-compare/b"
 
 
+def test_build_commit_pair_entries_generates_both_on_branch_collision() -> None:
+    entries = build_commit_pair_entries(
+        resolved=(
+            _resolved(refs=("main",)),
+            _resolved(refs=("main",)),
+        ),
+        labels=("a", "b"),
+        slug="my-compare",
+    )
+
+    assert entries[0].branch == "diamond-dev/my-compare/a"
+    assert entries[1].branch == "diamond-dev/my-compare/b"
+
+
+def test_build_commit_pair_entries_generates_both_on_explicit_sole_collision() -> None:
+    entries = build_commit_pair_entries(
+        resolved=(
+            _resolved(original_arg="feature", explicit_branch="feature"),
+            _resolved(refs=("feature",)),
+        ),
+        labels=("codex", "claude"),
+        slug="my-compare",
+    )
+
+    assert entries[0].branch == "diamond-dev/my-compare/codex"
+    assert entries[1].branch == "diamond-dev/my-compare/claude"
+
+
+def test_build_commit_pair_entries_rejects_duplicate_generated_branches() -> None:
+    with pytest.raises(DiamondDevError, match="Generated commit-pair branches"):
+        build_commit_pair_entries(
+            resolved=(
+                _resolved(original_arg="feature", explicit_branch="feature"),
+                _resolved(refs=("feature",)),
+            ),
+            labels=("same", "same"),
+            slug="my-compare",
+        )
+
+
 def test_commit_pair_slug_discovers_wiki_index(tmp_path: Path) -> None:
     wiki_dir = tmp_path / "repo.wiki"
     wiki_dir.mkdir()
@@ -203,6 +243,59 @@ def test_resolve_commit_pair_inputs_uses_matching_local_origin(
     assert left.source == "remote"
     assert right.source == "local"
     assert right.sha == local_sha
+
+
+def test_resolve_commit_pair_inputs_normalizes_file_origin_url(
+    tmp_path: Path,
+) -> None:
+    runner = CommandRunner(tmp_path / "logs")
+    remote, worktree = _git_fixture(tmp_path, runner)
+    pushed_sha = _commit_file(runner, worktree, "pushed.txt", "Codex pushed\n")
+    runner.run(
+        ("git", "push", "origin", "main"),
+        cwd=worktree,
+        log_name="push-main",
+    )
+    local_sha = _commit_file(runner, worktree, "local.txt", "Claude local\n")
+
+    left, right = resolve_commit_pair_inputs(
+        cwd=worktree,
+        repository_url=remote.as_uri(),
+        runner=runner,
+        commit_args=(pushed_sha, local_sha),
+    )
+
+    assert left.source == "remote"
+    assert right.source == "local"
+    assert right.sha == local_sha
+
+
+def test_resolve_commit_pair_inputs_handles_empty_resolved_ref_output(
+    tmp_path: Path,
+) -> None:
+    runner = _EmptyResolveRunner()
+
+    with pytest.raises(DiamondDevError, match="not reachable"):
+        resolve_commit_pair_inputs(
+            cwd=tmp_path,
+            repository_url="git@github.com:owner/repo.git",
+            runner=runner,  # type: ignore[arg-type]
+            commit_args=("abc123", "def456"),
+        )
+
+
+def test_resolve_commit_pair_inputs_rejects_empty_short_sha_output(
+    tmp_path: Path,
+) -> None:
+    runner = _EmptyShortShaRunner()
+
+    with pytest.raises(DiamondDevError, match="Failed to get short SHA"):
+        resolve_commit_pair_inputs(
+            cwd=tmp_path,
+            repository_url="git@github.com:owner/repo.git",
+            runner=runner,  # type: ignore[arg-type]
+            commit_args=("abc123", "def456"),
+        )
 
 
 def test_resolve_commit_pair_inputs_rejects_same_sha(tmp_path: Path) -> None:
@@ -376,4 +469,53 @@ class _SlugRunner:
             returncode=self.returncode,
             log_path=cwd / f"{log_name}.log",
             output=self.output,
+        )
+
+
+class _EmptyResolveRunner:
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        assert isinstance(check, bool)
+        command_tuple = tuple(command)
+        returncode = 1 if command_tuple[:3] == ("git", "remote", "get-url") else 0
+        return CommandResult(
+            command=command_tuple,
+            cwd=cwd,
+            returncode=returncode,
+            log_path=cwd / f"{log_name}.log",
+            output="",
+        )
+
+
+class _EmptyShortShaRunner:
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        assert isinstance(check, bool)
+        command_tuple = tuple(command)
+        if command_tuple[:3] == ("git", "rev-parse", "--short=12"):
+            output = ""
+        elif command_tuple[:2] == ("git", "rev-parse"):
+            output = "a" * 40
+        elif command_tuple[:2] == ("git", "log"):
+            output = "Message\n"
+        else:
+            output = ""
+        return CommandResult(
+            command=command_tuple,
+            cwd=cwd,
+            returncode=0,
+            log_path=cwd / f"{log_name}.log",
+            output=output,
         )

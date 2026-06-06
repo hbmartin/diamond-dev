@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,7 +13,7 @@ import pytest
 from diamond_dev import workflow
 from diamond_dev.acceptance import acceptance_wait_delays
 from diamond_dev.commit_pair import ResolvedCommitInput
-from diamond_dev.config import DiamondDevConfig
+from diamond_dev.config import AcceptanceConfig, DiamondDevConfig
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.executor import (
     CommandLogRecord,
@@ -556,7 +557,6 @@ def test_run_happy_path_walks_full_phase_sequence(
         "diamond_dev.preflight.shutil.which",
         lambda cli_name: f"/usr/bin/{cli_name}",
     )
-    monkeypatch.setattr("diamond_dev.orchestrator.acceptance_wait_delays", lambda: (0,))
     orchestrator = DiamondDevOrchestrator(
         cwd=tmp_path,
         runner=runner,
@@ -583,6 +583,8 @@ def test_run_happy_path_walks_full_phase_sequence(
     ]
 
     report = json.loads((tmp_path / "logs" / "run-report.json").read_text())
+    summary = json.loads((tmp_path / "logs" / "run.json").read_text())
+    assert summary == report
     assert report["status"] == "succeeded"
     assert report["phase_warnings"] == []
     assert report["context"]["artifacts"]["pr_url"] == (
@@ -599,6 +601,8 @@ def test_run_happy_path_walks_full_phase_sequence(
         "prepare or resume implementation clones",
         "finalize pull request",
     }
+    assert {phase["status"] for phase in report["phase_timings"]} == {"succeeded"}
+    assert all("log_path" in phase for phase in report["phase_timings"])
     assert any(
         command_log["label"] == "gh-pr-create"
         for command_log in report["command_logs"]
@@ -621,7 +625,6 @@ def test_run_reports_warning_status_when_coderabbit_review_fails(
         "diamond_dev.preflight.shutil.which",
         lambda cli_name: f"/usr/bin/{cli_name}",
     )
-    monkeypatch.setattr("diamond_dev.orchestrator.acceptance_wait_delays", lambda: (0,))
     orchestrator = DiamondDevOrchestrator(
         cwd=tmp_path,
         runner=runner,
@@ -650,6 +653,22 @@ def test_run_reports_warning_status_when_coderabbit_review_fails(
     assert "Workflow warnings:" in pr_body
     assert "CodeRabbit review (failed)" in pr_body
     assert "Codex review fixes (skipped)" in pr_body
+
+
+def test_run_reports_failed_phase_when_setup_fails(tmp_path: Path) -> None:
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    with pytest.raises(DiamondDevError, match="Plan file not found"):
+        orchestrator.run(tmp_path / "missing.md")
+
+    report = json.loads((tmp_path / "logs" / "run-report.json").read_text())
+    summary = json.loads((tmp_path / "logs" / "run.json").read_text())
+    assert summary == report
+    assert report["status"] == "failed"
+    assert "Plan file not found" in report["error"]
+    assert report["phase_timings"][0]["name"] == "resolve plan"
+    assert report["phase_timings"][0]["status"] == "failed"
+    assert "Plan file not found" in report["phase_timings"][0]["error"]
 
 
 def test_run_commits_skips_initial_agents(
@@ -799,6 +818,64 @@ def test_finalize_pr_uses_selected_branch_title_for_commit_pair(
     )
 
 
+def test_clone_commit_pair_repositories_generates_branch_for_base_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entries = (
+        CommitPairEntry(
+            label="a",
+            original_arg="main",
+            sha="a" * 40,
+            short_sha="aaaaaaaaaaaa",
+            message="Left",
+            ref_names=("main",),
+            branch="main",
+        ),
+        CommitPairEntry(
+            label="b",
+            original_arg="feature",
+            sha="b" * 40,
+            short_sha="bbbbbbbbbbbb",
+            message="Right",
+            ref_names=("feature",),
+            branch="feature",
+        ),
+    )
+    context = workflow.build_commit_pair_run_context(
+        cwd=tmp_path,
+        slug="commit-compare",
+        entries=entries,
+        config=DiamondDevConfig(
+            config_path=tmp_path / ".diamond-dev.toml",
+            repository_url="git@github.com:owner/repo.git",
+        ),
+    )
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "remote_default_branch",
+        lambda _repo_dir: "main",
+    )
+
+    updated_context = orchestrator._clone_commit_pair_repositories(context)  # noqa: SLF001
+
+    assert updated_context.commit_pair is not None
+    entry_branches = tuple(
+        entry.branch for entry in updated_context.commit_pair.entries
+    )
+    implementation_branches = tuple(
+        branch.branch for branch in updated_context.implementation.branches
+    )
+    assert entry_branches == implementation_branches
+    assert entry_branches == ("diamond-dev/commit-compare/a", "feature")
+    checkout_commands = [
+        command for command in runner.commands if command[:3] == ("git", "checkout", "-B")
+    ]
+    assert checkout_commands[0][3] == "diamond-dev/commit-compare/a"
+
+
 def test_run_uses_configured_review_fixer_and_final_reviewer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -824,7 +901,6 @@ def test_run_uses_configured_review_fixer_and_final_reviewer(
         "diamond_dev.preflight.shutil.which",
         lambda cli_name: f"/usr/bin/{cli_name}",
     )
-    monkeypatch.setattr("diamond_dev.orchestrator.acceptance_wait_delays", lambda: (0,))
     orchestrator = DiamondDevOrchestrator(
         cwd=tmp_path,
         runner=runner,
@@ -1765,12 +1841,23 @@ def test_poll_acceptance_skips_missing_wiki_comparison_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    context = build_context(tmp_path)
+    base_context = build_context(tmp_path)
+    context = replace(
+        base_context,
+        config=replace(
+            base_context.config,
+            acceptance=AcceptanceConfig(
+                poll_interval_seconds=2,
+                max_wait_seconds=5,
+            ),
+        ),
+    )
     runner = _RecordingRunner()
+    sleep_calls: list[float] = []
     orchestrator = DiamondDevOrchestrator(
         cwd=tmp_path,
         runner=runner,
-        sleep=lambda _seconds: None,
+        sleep=lambda seconds: sleep_calls.append(seconds),
     )
     sync_calls: list[Path] = []
 
@@ -1783,8 +1870,15 @@ def test_poll_acceptance_skips_missing_wiki_comparison_file(
         orchestrator._poll_acceptance(context)  # noqa: SLF001
 
     assert sync_calls == [context.wiki.directory] * (
-        len(acceptance_wait_delays()) + 1
+        len(
+            acceptance_wait_delays(
+                poll_interval_seconds=2,
+                max_wait_seconds=5,
+            ),
+        )
+        + 1
     )
+    assert sleep_calls == [2, 2, 1]
 
 
 def test_commit_if_changes_skips_missing_untracked_paths(tmp_path: Path) -> None:
