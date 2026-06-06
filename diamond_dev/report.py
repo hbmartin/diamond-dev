@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 type RunStatus = Literal["succeeded", "succeeded_with_warnings", "failed"]
 type PhaseWarningStatus = Literal["failed", "skipped"]
+type PhaseTimingStatus = Literal["succeeded", "failed"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,9 @@ class PhaseTiming:
 
     name: str
     duration_seconds: float
+    status: PhaseTimingStatus = "succeeded"
+    error: str | None = None
+    log_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +79,6 @@ class RunReport:
 
 def write_run_report(report: RunReport) -> None:
     """Write a deterministic JSON summary for an attempted run."""
-    report.path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "status": report.status,
         "started_at": report.timing.started_at.isoformat(),
@@ -89,11 +92,20 @@ def write_run_report(report: RunReport) -> None:
         "phase_warnings": _phase_warnings_payload(report.phase_warnings),
         "command_logs": _command_logs_payload(report.command_logs),
     }
-    report.path.write_text(
+    _write_json_payload(report.path, payload)
+    logger.info("Wrote run report: {}", report.path)
+    summary_path = report.path.with_name("run.json")
+    if summary_path != report.path:
+        _write_json_payload(summary_path, payload)
+        logger.info("Wrote run summary: {}", summary_path)
+
+
+def _write_json_payload(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         f"{json.dumps(payload, indent=2, sort_keys=True)}\n",
         encoding="utf-8",
     )
-    logger.info("Wrote run report: {}", report.path)
 
 
 def _context_payload(context: RunContext | None) -> dict[str, object] | None:
@@ -225,6 +237,9 @@ def _phase_timings_payload(
         {
             "name": phase_timing.name,
             "duration_seconds": round(phase_timing.duration_seconds, 3),
+            "status": phase_timing.status,
+            "error": phase_timing.error,
+            "log_path": phase_timing.log_path,
         }
         for phase_timing in phase_timings
     ]

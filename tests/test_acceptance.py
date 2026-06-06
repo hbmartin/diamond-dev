@@ -90,16 +90,29 @@ def test_parse_acceptance_rejects_malformed_values(markdown: str) -> None:
 
 
 def test_acceptance_wait_delays_are_deterministic() -> None:
-    assert acceptance_wait_delays() == (
-        120,
-        180,
-        240,
-        300,
-        360,
-        420,
-        480,
-        540,
-        600,
-        660,
-        720,
-    )
+    delays = acceptance_wait_delays()
+
+    assert sum(delays) == 4_620
+    assert delays[:3] == (120, 120, 120)
+    assert delays[-1] == 60
+
+
+def test_acceptance_wait_delays_cap_final_interval() -> None:
+    assert acceptance_wait_delays(
+        poll_interval_seconds=5,
+        max_wait_seconds=12,
+    ) == (5, 5, 2)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"poll_interval_seconds": 0},
+        {"max_wait_seconds": 0},
+    ],
+)
+def test_acceptance_wait_delays_rejects_non_positive_values(
+    kwargs: dict[str, int],
+) -> None:
+    with pytest.raises(ValueError):
+        acceptance_wait_delays(**kwargs)

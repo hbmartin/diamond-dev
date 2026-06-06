@@ -49,7 +49,10 @@ def parse_args(argv: Sequence[str] | None = None) -> Namespace:
     args = parser.parse_args(argv)
     positional_args = args.command_or_plan
     if not positional_args:
-        parser.error("the following arguments are required: plan_path or command")
+        parser.error(
+            "the following arguments are required: plan_path, command, "
+            "or two commit-ish refs",
+        )
     if positional_args[0] == "init":
         if len(positional_args) > 1:
             parser.error("init does not accept positional arguments")

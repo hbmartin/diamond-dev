@@ -235,6 +235,10 @@ max_total_diff_bytes = 200000
 max_file_diff_bytes = 40000
 max_test_output_bytes = 20000
 
+[acceptance]
+poll_interval_seconds = 120
+max_wait_seconds = 4620
+
 [agents.codex]
 model = "gpt-5"
 
@@ -268,6 +272,11 @@ are trusted project-specific commands. If they leave uncommitted files,
 
 Notification URLs are best-effort GET requests. Failures are logged but do not
 stop the workflow.
+
+The `[acceptance]` table controls how long the workflow waits for the wiki
+acceptance checkbox after the immediate first check. `poll_interval_seconds`
+sets the fixed wait between checks, and `max_wait_seconds` caps the total wait
+window. The defaults preserve the previous 77-minute total polling window.
 
 <details>
 <summary>Legacy and removed keys (migration)</summary>
@@ -335,9 +344,11 @@ the short SHA pair is appended.
 Two-commit clone directories use `<label>-<slug>`, where labels are inferred
 from commit messages first, then branch/ref names. `codex` and `claude` labels
 are inferred as a pair when possible; otherwise labels fall back to `a` and `b`.
-When an input is an existing branch/ref, that branch is used. If a SHA maps to a
-single containing branch, that branch is used. Ambiguous or unbranched SHAs use
-generated branches named `diamond-dev/<slug>/<label>`.
+When safe, an input existing branch/ref is used as the workflow branch. If a SHA
+maps to a single containing branch, that branch is also used when safe. Duplicate
+branch candidates or branches matching the remote base branch fall back to
+generated workflow branches named `diamond-dev/<slug>/<label>`. Ambiguous or
+unbranched SHAs also use generated branches.
 
 The wiki clone is reused if present and synchronized with fast-forward-only
 pulls. On a fresh run, `diamond-dev` clones the implementation repository once,
@@ -424,8 +435,8 @@ With custom implementers, the checkbox and accepted values use the configured
 implementer names, for example `- [ ] Accept: (codex/claude/aider)`.
 
 Malformed acceptance markers fail immediately. The command checks once
-immediately, then waits 2 minutes, then retries with waits of 3 through 12
-minutes.
+immediately, then polls every `acceptance.poll_interval_seconds` until
+`acceptance.max_wait_seconds` has elapsed.
 
 Review judgment creates a machine-readable sidecar named
 `<slug>-review-judgments.json` with `schema_version`, `review_file`,
@@ -466,13 +477,13 @@ Agent subprocess logs are written under `logs/` and streamed through Loguru.
 Agents commit their changes; `diamond-dev` pushes committed work. If uncommitted
 files remain, they are logged and included in the final PR body.
 
-Each run also writes `logs/run-report.json`, a structured summary containing the
-run status, chosen agent, branches, PR URL, dirty-file records, per-phase
-timings, non-fatal phase warnings, preflight details, and per-step command log
-paths. The report includes comparison bundle and review judgment sidecar paths,
-plus the sidecar parse status. Runs that finish after skipped or failed
-best-effort phases report `succeeded_with_warnings` and include those warnings
-in the PR body.
+Each run also writes `logs/run-report.json` and the equivalent `logs/run.json`,
+a structured summary containing the run status, chosen agent, branches, PR URL,
+dirty-file records, per-phase timings and statuses, non-fatal phase warnings,
+preflight details, and per-step command log paths. The report includes
+comparison bundle and review judgment sidecar paths, plus the sidecar parse
+status. Runs that finish after skipped or failed best-effort phases report
+`succeeded_with_warnings` and include those warnings in the PR body.
 
 Configure logging with environment variables:
 
@@ -492,6 +503,9 @@ read/write permissions. Exception logs include extended tracebacks. When
 OpenTelemetry is installed, log records include the active trace ID, span ID,
 sampled flag, and service name; otherwise those fields are present with default
 zero or empty values.
+
+Phase start, success, and failure messages include structured JSONL fields such
+as `phase`, `phase_status`, and `duration_seconds` for dashboard and CI parsing.
 
 ## Troubleshooting & FAQ
 

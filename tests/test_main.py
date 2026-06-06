@@ -71,6 +71,16 @@ def test_parse_args_rejects_invalid_positional_arity() -> None:
     assert exit_info.value.code == 2
 
 
+def test_parse_args_no_args_mentions_commit_refs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        parse_args([])
+
+    assert exit_info.value.code == 2
+    assert "two commit-ish refs" in capsys.readouterr().err
+
+
 def test_parse_args_supports_version_flag() -> None:
     with pytest.raises(SystemExit) as exit_info:
         parse_args(["--version"])

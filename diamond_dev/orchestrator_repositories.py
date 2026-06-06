@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from diamond_dev.commands import build_pnpm_install_command, build_uv_sync_command
+from diamond_dev.commit_pair import commit_pair_entries_avoiding_base_branch
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.markdown import read_normalized_markdown
 
@@ -164,10 +165,6 @@ class RepositoryPreparationMixin:
         return context
 
     def _clone_commit_pair_repositories(self, context: RunContext) -> RunContext:
-        commit_pair = context.commit_pair
-        if commit_pair is None:
-            raise DiamondDevError("Commit-pair clone preparation requires metadata")
-
         implementation = context.implementation
         primary_branch = implementation.primary_branch
         self.runner.run(
@@ -181,6 +178,10 @@ class RepositoryPreparationMixin:
             log_name=f"{primary_branch.log_prefix}-clone",
         )
         context = self._with_remote_base_branch(context)
+        context = self._with_commit_pair_branches_avoiding_base(context)
+        commit_pair = context.commit_pair
+        if commit_pair is None:
+            raise DiamondDevError("Commit-pair clone preparation requires metadata")
         implementation = context.implementation
         for branch in implementation.branches[1:]:
             self._copy_implementation_repository(
@@ -222,9 +223,10 @@ class RepositoryPreparationMixin:
         return context
 
     def _resume_commit_pair_clones(self, context: RunContext) -> RunContext:
+        context = self._with_remote_base_branch(context)
+        context = self._with_commit_pair_branches_avoiding_base(context)
         for agent_branch in context.implementation.branches:
             self._validate_resume_clone(context, agent_branch)
-        context = self._with_remote_base_branch(context)
         self._install_implementation_packages(context.implementation)
         return context
 
@@ -235,6 +237,25 @@ class RepositoryPreparationMixin:
             ),
         )
         return context.with_implementation(implementation)
+
+    def _with_commit_pair_branches_avoiding_base(
+        self,
+        context: RunContext,
+    ) -> RunContext:
+        commit_pair = context.commit_pair
+        if commit_pair is None:
+            raise DiamondDevError("Commit-pair branch adjustment requires metadata")
+        entries = commit_pair_entries_avoiding_base_branch(
+            commit_pair,
+            context.implementation.base_branch,
+        )
+        if entries == commit_pair.entries:
+            return context
+        logger.info(
+            "Using generated commit-pair branch for base branch candidate: {}",
+            context.implementation.base_branch,
+        )
+        return context.with_commit_pair_entries(entries)
 
     def _install_implementation_packages(
         self,

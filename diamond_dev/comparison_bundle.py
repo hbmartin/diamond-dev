@@ -83,12 +83,16 @@ def _run_identity_lines(context: RunContext) -> list[str]:
         f"- Left arg: {left.original_arg}",
         f"- Left label: {left.label}",
         f"- Left SHA: {left.sha}",
-        f"- Left message: {left.message}",
+        f"- Left message: {_commit_subject(left.message)}",
         f"- Right arg: {right.original_arg}",
         f"- Right label: {right.label}",
         f"- Right SHA: {right.sha}",
-        f"- Right message: {right.message}",
+        f"- Right message: {_commit_subject(right.message)}",
     ]
+
+
+def _commit_subject(message: str) -> str:
+    return message.splitlines()[0] if message else ""
 
 
 def _branch_section(

@@ -1,21 +1,29 @@
 """Two-commit comparison helpers."""
 
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import re
 import shutil
 import tempfile
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
+from urllib.parse import urlsplit
 
 from loguru import logger
 
 from diamond_dev.commands import build_codex_command
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.naming import slugify
-from diamond_dev.workflow import CommitPairContext, CommitPairEntry, RunContext
+from diamond_dev.workflow import (
+    CommitMetadata,
+    CommitPairContext,
+    CommitPairEntry,
+    RunContext,
+)
 
 if TYPE_CHECKING:
     from diamond_dev.executor import CommandRunner
@@ -39,14 +47,9 @@ _LABEL_NAMES: Final = ("codex", "claude")
 
 
 @dataclass(frozen=True, slots=True)
-class ResolvedCommitInput:
+class ResolvedCommitInput(CommitMetadata):
     """Commit metadata resolved before final workflow clone names are known."""
 
-    original_arg: str
-    sha: str
-    short_sha: str
-    message: str
-    ref_names: tuple[str, ...]
     explicit_branch: str | None
     source: str
 
@@ -153,7 +156,39 @@ def build_commit_pair_entries(
         )
         for commit, label in zip(resolved, labels, strict=True)
     )
-    return left, right
+    entries = (left, right)
+    if _has_duplicate_branches(entries):
+        return _generated_entry_pair(entries, slug)
+    return entries
+
+
+def commit_pair_entries_avoiding_base_branch(
+    commit_pair: CommitPairContext,
+    base_branch: str,
+) -> tuple[CommitPairEntry, CommitPairEntry]:
+    """Return entries that avoid using the resolved base branch."""
+    if not base_branch:
+        return commit_pair.entries
+    if not any(entry.branch == base_branch for entry in commit_pair.entries):
+        return commit_pair.entries
+
+    left, right = commit_pair.entries
+    adjusted_entries = (
+        _entry_with_generated_branch(left, commit_pair.slug)
+        if left.branch == base_branch
+        else left,
+        _entry_with_generated_branch(right, commit_pair.slug)
+        if right.branch == base_branch
+        else right,
+    )
+    if _has_duplicate_branches(adjusted_entries):
+        return _generated_entry_pair(commit_pair.entries, commit_pair.slug)
+    return adjusted_entries
+
+
+def generated_commit_pair_branch(slug: str, label: str) -> str:
+    """Return the generated workflow branch for one commit-pair entry."""
+    return f"diamond-dev/{slug}/{label}"
 
 
 def discover_commit_pair_slug(
@@ -440,7 +475,8 @@ def _resolve_ref(
         check=False,
     )
     if result.returncode == 0:
-        return result.output.strip().splitlines()[-1]
+        lines = result.output.strip().splitlines()
+        return lines[-1] if lines else None
     return None
 
 
@@ -463,7 +499,10 @@ def _short_sha(
         cwd=repo_dir,
         log_name=log_name,
     )
-    return result.output.strip().splitlines()[-1]
+    lines = result.output.strip().splitlines()
+    if not lines:
+        raise DiamondDevError(f"Failed to get short SHA for {sha}")
+    return lines[-1]
 
 
 def _commit_message(
@@ -589,7 +628,53 @@ def _cwd_origin_matches(
         log_name="commit-local-origin-url",
         check=False,
     )
-    return result.returncode == 0 and result.output.strip() == repository_url
+    return result.returncode == 0 and _normalized_repository_url(
+        result.output,
+    ) == _normalized_repository_url(repository_url)
+
+
+def _normalized_repository_url(url: str) -> str:
+    clean_url = url.strip().rstrip("/")
+    if not clean_url:
+        return ""
+
+    if "://" in clean_url:
+        parsed = urlsplit(clean_url)
+        if parsed.scheme == "file":
+            return _strip_repository_url_suffix(parsed.path)
+
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return _strip_repository_url_suffix(clean_url)
+
+        port = _normalized_url_port(parsed.scheme, parsed.port)
+        path = parsed.path.strip("/")
+        return _strip_repository_url_suffix(f"{host}{port}/{path}")
+
+    if re.match(r"^[^/@:]+@[^:]+:.+", clean_url):
+        user_host, path = clean_url.split(":", 1)
+        host = user_host.rsplit("@", 1)[-1].lower()
+        return _strip_repository_url_suffix(f"{host}/{path.strip('/')}")
+
+    return _strip_repository_url_suffix(clean_url)
+
+
+def _normalized_url_port(scheme: str, port: int | None) -> str:
+    if port is None:
+        return ""
+    default_ports = {
+        "git": 22,
+        "http": 80,
+        "https": 443,
+        "ssh": 22,
+    }
+    if default_ports.get(scheme) == port:
+        return ""
+    return f":{port}"
+
+
+def _strip_repository_url_suffix(url: str) -> str:
+    return url.rstrip("/").removesuffix(".git")
 
 
 def _label_matches(values: Sequence[str]) -> frozenset[str]:
@@ -620,7 +705,37 @@ def _branch_for_commit(
         return commit.explicit_branch
     if len(commit.ref_names) == 1:
         return commit.ref_names[0]
-    return f"diamond-dev/{slug}/{label}"
+    return generated_commit_pair_branch(slug, label)
+
+
+def _generated_entry_pair(
+    entries: tuple[CommitPairEntry, CommitPairEntry],
+    slug: str,
+) -> tuple[CommitPairEntry, CommitPairEntry]:
+    left, right = entries
+    entry_pair = (
+        _entry_with_generated_branch(left, slug),
+        _entry_with_generated_branch(right, slug),
+    )
+    if _has_duplicate_branches(entry_pair):
+        branches = ", ".join(entry.branch for entry in entry_pair)
+        raise DiamondDevError(
+            "Generated commit-pair branches must be distinct; "
+            f"got duplicate branch names from labels: {branches}",
+        )
+    return entry_pair
+
+
+def _entry_with_generated_branch(
+    entry: CommitPairEntry,
+    slug: str,
+) -> CommitPairEntry:
+    return replace(entry, branch=generated_commit_pair_branch(slug, entry.label))
+
+
+def _has_duplicate_branches(entries: Sequence[CommitPairEntry]) -> bool:
+    branches = [entry.branch for entry in entries]
+    return len(set(branches)) != len(branches)
 
 
 def _codex_generated_slug(
@@ -671,6 +786,7 @@ def _slug_used_for_different_pair(
             comparison_path.read_text(encoding="utf-8"),
         )
         if not comparison_records:
+            # Markerless legacy comparisons may own this slug; avoid overwriting them.
             return True
     return any(
         record.slug == slug
