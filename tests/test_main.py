@@ -88,6 +88,24 @@ def test_parse_args_supports_version_flag() -> None:
     assert exit_info.value.code == 0
 
 
+def test_package_version_falls_back_to_pyproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nversion = "9.8.7"\n',
+        encoding="utf-8",
+    )
+
+    def missing_package_version(_package_name: str) -> str:
+        raise main_module.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(main_module.metadata, "version", missing_package_version)
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+
+    assert main_module._package_version() == "9.8.7"  # noqa: SLF001
+
+
 def test_main_dispatches_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Path, Path | None, bool]] = []
 
