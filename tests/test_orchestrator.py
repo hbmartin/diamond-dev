@@ -694,6 +694,35 @@ def test_timed_phase_records_command_failure_log_path(tmp_path: Path) -> None:
     assert phase_timings[0].log_path == str(command_log_path)
 
 
+def test_timed_phase_ignores_suppressed_context_log_path(tmp_path: Path) -> None:
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    phase_timings = []
+    command_log_path = tmp_path / "logs" / "suppressed-command.log"
+
+    def raise_command_failure() -> None:
+        raise CommandFailureError(
+            command="git status",
+            cwd=str(tmp_path),
+            returncode=1,
+            log_path=str(command_log_path),
+        )
+
+    def fail_with_suppressed_context() -> None:
+        try:
+            raise_command_failure()
+        except (CommandFailureError,):
+            raise DiamondDevError("redacted failure") from None
+
+    with pytest.raises(DiamondDevError):
+        orchestrator._timed_phase(  # noqa: SLF001
+            phase_timings,
+            "suppressed failure",
+            fail_with_suppressed_context,
+        )
+
+    assert phase_timings[0].log_path is None
+
+
 def test_timed_phase_records_keyboard_interrupt(tmp_path: Path) -> None:
     orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
     phase_timings = []

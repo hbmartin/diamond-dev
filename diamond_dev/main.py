@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from argparse import ArgumentParser, Namespace
 from collections.abc import Sequence
 from importlib import metadata
@@ -15,6 +16,7 @@ from diamond_dev.logging_setup import configure_logging
 from diamond_dev.orchestrator import DiamondDevOrchestrator
 
 PACKAGE_NAME = "diamond-dev"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def parse_args(argv: Sequence[str] | None = None) -> Namespace:
@@ -101,7 +103,22 @@ def _package_version() -> str:
     try:
         return metadata.version(PACKAGE_NAME)
     except (metadata.PackageNotFoundError,):
-        return "0.1.0"
+        return _source_tree_version()
+
+
+def _source_tree_version() -> str:
+    pyproject_path = PROJECT_ROOT / "pyproject.toml"
+    try:
+        pyproject_data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return "unknown"
+    project_data = pyproject_data.get("project")
+    if not isinstance(project_data, dict):
+        return "unknown"
+    version = project_data.get("version")
+    if not isinstance(version, str):
+        return "unknown"
+    return version
 
 
 if __name__ == "__main__":

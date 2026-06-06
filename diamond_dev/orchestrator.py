@@ -595,7 +595,12 @@ def _phase_error_log_path(error: BaseException) -> str | None:
     while current_error is not None:
         if isinstance(current_error, CommandFailureError):
             return current_error.log_path
-        current_error = current_error.__cause__ or current_error.__context__
+        if current_error.__cause__ is not None:
+            current_error = current_error.__cause__
+        elif current_error.__suppress_context__:
+            current_error = None
+        else:
+            current_error = current_error.__context__
     return None
 
 
