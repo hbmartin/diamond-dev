@@ -651,9 +651,14 @@ def _normalized_repository_url(url: str) -> str:
         path = parsed.path.strip("/")
         return _strip_repository_url_suffix(f"{host}{port}/{path}")
 
-    if re.match(r"^[^/@:]+@[^:]+:.+", clean_url):
-        user_host, path = clean_url.split(":", 1)
-        host = user_host.rsplit("@", 1)[-1].lower()
+    if not re.match(r"^[a-zA-Z]:[\\/]", clean_url) and (
+        scp_match := re.match(
+            r"^(?:[^/@:]+@)?(?P<host>[^/:]+):(?P<path>.+)$",
+            clean_url,
+        )
+    ):
+        host = scp_match.group("host").lower()
+        path = scp_match.group("path")
         return _strip_repository_url_suffix(f"{host}/{path.strip('/')}")
 
     return _strip_repository_url_suffix(clean_url)
@@ -663,7 +668,7 @@ def _normalized_url_port(scheme: str, port: int | None) -> str:
     if port is None:
         return ""
     default_ports = {
-        "git": 22,
+        "git": 9418,
         "http": 80,
         "https": 443,
         "ssh": 22,

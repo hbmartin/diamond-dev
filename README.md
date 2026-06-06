@@ -276,7 +276,10 @@ stop the workflow.
 The `[acceptance]` table controls how long the workflow waits for the wiki
 acceptance checkbox after the immediate first check. `poll_interval_seconds`
 sets the fixed wait between checks, and `max_wait_seconds` caps the total wait
-window. The defaults preserve the previous 77-minute total polling window.
+window. The defaults preserve the previous 77-minute total polling window with
+a more responsive fixed cadence: one immediate wiki sync followed by 39 delayed
+checks, which increases remote fetch/pull load compared with the legacy backoff
+schedule.
 
 <details>
 <summary>Legacy and removed keys (migration)</summary>
@@ -524,7 +527,8 @@ generated repositories and wiki artifacts. See [Auto-Resume](#auto-resume).
 
 **The run exited while waiting for acceptance.** That's fine. Edit the acceptance
 checkbox in the wiki, then rerun `diamond-dev my-plan.md`; it auto-resumes and
-picks up your choice.
+picks up your choice. Pressing Ctrl-C during acceptance polling exits with code
+130 after writing the current run report.
 
 **A run finished with `succeeded_with_warnings`.** One or more best-effort phases
 (such as a notification or an optional test command) were skipped or failed but

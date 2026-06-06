@@ -1,5 +1,7 @@
 """Diamond Dev workflow orchestration."""
 
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import shutil
@@ -74,6 +76,8 @@ T = TypeVar("T")
 @dataclass(slots=True)
 class _RunState:
     """Mutable state captured while writing a run report."""
+
+    # pylint: disable=too-many-instance-attributes
 
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_monotonic: float = field(default_factory=time.perf_counter)
@@ -322,8 +326,8 @@ class DiamondDevOrchestrator(
         run_state = _RunState()
         try:
             yield run_state
-        except (Exception,) as run_error:
-            run_state.error = str(run_error)
+        except (Exception, KeyboardInterrupt) as run_error:
+            run_state.error = _phase_error_message(run_error)
             raise
         else:
             run_state.status = (
@@ -368,14 +372,15 @@ class DiamondDevOrchestrator(
         )
         try:
             result = action()
-        except (Exception,) as error:
+        except (Exception, KeyboardInterrupt) as error:
             duration_seconds = time.perf_counter() - phase_started
             phase_timings.append(
                 PhaseTiming(
                     name=name,
                     duration_seconds=duration_seconds,
                     status="failed",
-                    error=str(error),
+                    error=_phase_error_message(error),
+                    log_path=_phase_error_log_path(error),
                 ),
             )
             logger.bind(
@@ -574,6 +579,24 @@ def _default_report_path(runner: object, cwd: Path) -> Path:
     if isinstance(log_dir, Path):
         return log_dir / "run-report.json"
     return cwd / "logs" / "run-report.json"
+
+
+def _phase_error_message(error: BaseException) -> str:
+    message = str(error)
+    if message:
+        return message
+    if isinstance(error, KeyboardInterrupt):
+        return "Interrupted by user"
+    return type(error).__name__
+
+
+def _phase_error_log_path(error: BaseException) -> str | None:
+    current_error: BaseException | None = error
+    while current_error is not None:
+        if isinstance(current_error, CommandFailureError):
+            return current_error.log_path
+        current_error = current_error.__cause__ or current_error.__context__
+    return None
 
 
 def _command_log_records(runner: object) -> tuple[CommandLogRecord, ...]:

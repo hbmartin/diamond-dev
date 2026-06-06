@@ -89,6 +89,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.commit_args,
             )
         return DiamondDevOrchestrator(config_path=args.config).run(args.plan_path)
+    except (KeyboardInterrupt,):
+        logger.warning("Diamond Dev interrupted")
+        return 130
     except (DiamondDevError,) as error:
         logger.error("Diamond Dev failed: {}", error)
         return 1
