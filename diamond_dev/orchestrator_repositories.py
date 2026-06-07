@@ -14,7 +14,7 @@ from diamond_dev.errors import DiamondDevError
 from diamond_dev.markdown import read_normalized_markdown
 
 if TYPE_CHECKING:
-    from diamond_dev.executor import CommandRunner
+    from diamond_dev.executor import CommandRunnerLike
     from diamond_dev.git_ops import GitOperations
     from diamond_dev.providers import GitHubWorkflowProvider
     from diamond_dev.workflow import (
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 class RepositoryPreparationMixin:
     """Prepare or validate wiki and implementation repositories."""
 
-    runner: CommandRunner
+    runner: CommandRunnerLike
     git: GitOperations
     workflow_provider: GitHubWorkflowProvider
 

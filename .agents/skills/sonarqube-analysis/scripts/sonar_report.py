@@ -37,6 +37,13 @@ DEFAULT_METRICS = ",".join(
         "new_lines",
     ]
 )
+SEVERITY_RANK = {
+    "BLOCKER": 0,
+    "CRITICAL": 1,
+    "MAJOR": 2,
+    "MINOR": 3,
+    "INFO": 4,
+}
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -97,6 +104,11 @@ def issue_path(issue: dict[str, Any]) -> str:
 def first_impact(issue: dict[str, Any]) -> dict[str, str]:
     impacts = issue.get("impacts") or []
     return impacts[0] if impacts else {}
+
+
+def severity_rank(issue: dict[str, Any]) -> int:
+    severity = issue.get("severity")
+    return SEVERITY_RANK.get(severity, 99) if isinstance(severity, str) else 99
 
 
 def fetch_issues(
@@ -171,7 +183,7 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
     if missing:
         raise SystemExit(f"Missing required env keys: {', '.join(missing)}")
 
-    branch = args.branch or env.get("SONAR_BRANCH") or "trunk"
+    branch = args.branch or env.get("SONAR_BRANCH") or "main"
     project = args.project or env["SONAR_PROJECT_KEY"]
     client = SonarClient(env["SONAR_HOST_URL"], env["SONAR_TOKEN"])
 
@@ -230,9 +242,7 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
             "risk": sorted(
                 risk_issues,
                 key=lambda issue: (
-                    ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"].index(issue.get("severity", "INFO"))
-                    if issue.get("severity") in ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
-                    else 99,
+                    severity_rank(issue),
                     issue_path(issue),
                     issue.get("line") or 0,
                 ),
@@ -357,7 +367,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Summarize SonarQube Cloud findings.")
     parser.add_argument("--env", default=".env", help="Path to local env file.")
     parser.add_argument("--project", help="Sonar project key. Defaults to SONAR_PROJECT_KEY.")
-    parser.add_argument("--branch", help="Branch to query. Defaults to SONAR_BRANCH or trunk.")
+    parser.add_argument("--branch", help="Branch to query. Defaults to SONAR_BRANCH or main.")
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     parser.add_argument("--top", type=int, default=12, help="Number of detailed rows per section.")
     parser.add_argument("--new-code", action="store_true", help="Filter the main issue set to new-code issues.")

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from diamond_dev.agents import AgentCapability
-    from diamond_dev.executor import CommandResult, CommandRunner
+    from diamond_dev.executor import CommandResult, CommandRunnerLike
     from diamond_dev.git_ops import GitOperations
     from diamond_dev.providers import GitHubWorkflowProvider
     from diamond_dev.workflow import RunContext, SelectedImplementation
@@ -41,7 +41,7 @@ class ComparisonPhasesMixin:
 
     cwd: Path
     git: GitOperations
-    runner: CommandRunner
+    runner: CommandRunnerLike
     workflow_provider: GitHubWorkflowProvider
 
     def _run_agent(  # noqa: PLR0913
@@ -172,6 +172,7 @@ class ComparisonPhasesMixin:
         return active_context
 
     def _promote_local_comparison(self, context: RunContext) -> None:
+        # Re-sanitize at the filesystem sink so path safety stays local.
         comparison_file = safe_child_path(context.cwd, context.comparison_file.name)
         comparison_markdown = comparison_file.read_text(encoding="utf-8")
         comparison_markdown = ensure_commit_pair_marker(comparison_markdown, context)

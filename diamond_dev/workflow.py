@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -250,16 +250,7 @@ class RunContext:
         implementation: ImplementationContext,
     ) -> RunContext:
         """Return a copy with updated implementation repository details."""
-        return RunContext(
-            cwd=self.cwd,
-            config=self.config,
-            plan=self.plan,
-            wiki=self.wiki,
-            implementation=implementation,
-            commit_pair=self.commit_pair,
-            dirty_records=self.dirty_records,
-            pr_url=self.pr_url,
-        )
+        return replace(self, implementation=implementation)
 
     def with_commit_pair_entries(
         self,
@@ -289,42 +280,19 @@ class RunContext:
             ),
             base_branch=self.implementation.base_branch,
         )
-        return RunContext(
-            cwd=self.cwd,
-            config=self.config,
-            plan=self.plan,
-            wiki=self.wiki,
+        return replace(
+            self,
             implementation=implementation,
             commit_pair=CommitPairContext(slug=commit_pair.slug, entries=entries),
-            dirty_records=self.dirty_records,
-            pr_url=self.pr_url,
         )
 
     def with_dirty_record(self, dirty_record: DirtyRecord) -> RunContext:
         """Return a copy with an added dirty-file record."""
-        return RunContext(
-            cwd=self.cwd,
-            config=self.config,
-            plan=self.plan,
-            wiki=self.wiki,
-            implementation=self.implementation,
-            commit_pair=self.commit_pair,
-            dirty_records=(*self.dirty_records, dirty_record),
-            pr_url=self.pr_url,
-        )
+        return replace(self, dirty_records=(*self.dirty_records, dirty_record))
 
     def with_pr_url(self, pr_url: str) -> RunContext:
         """Return a copy with the created pull request URL."""
-        return RunContext(
-            cwd=self.cwd,
-            config=self.config,
-            plan=self.plan,
-            wiki=self.wiki,
-            implementation=self.implementation,
-            commit_pair=self.commit_pair,
-            dirty_records=self.dirty_records,
-            pr_url=pr_url,
-        )
+        return replace(self, pr_url=pr_url)
 
 
 @dataclass(frozen=True, slots=True, init=False)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
 
@@ -13,7 +13,7 @@ from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.workflow import DirtyRecord
 
 if TYPE_CHECKING:
-    from diamond_dev.executor import CommandResult, CommandRunner
+    from diamond_dev.executor import CommandExecutor, CommandResult
     from diamond_dev.workflow import RunContext
 
 
@@ -25,10 +25,80 @@ class BranchAheadBehind:
     behind: int
 
 
+class GitHubGitOperations(Protocol):
+    """Git operations needed by the GitHub workflow provider."""
+
+    def sync_wiki(self, wiki_dir: Path) -> None:
+        """Fetch and fast-forward the wiki repository."""
+        ...
+
+    def run(
+        self,
+        repo_dir: Path,
+        *args: str,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        """Run a git command in a repository."""
+        ...
+
+    def remote_url_branch_exists(
+        self,
+        cwd: Path,
+        *,
+        remote_url: str,
+        branch: str,
+        log_name: str,
+    ) -> bool:
+        """Return whether a branch exists on a remote URL."""
+        ...
+
+
+class ComparisonGitOperations(Protocol):
+    """Git operations needed to build comparison bundles."""
+
+    def run(
+        self,
+        repo_dir: Path,
+        *args: str,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        """Run a git command in a repository."""
+        ...
+
+    def revision(self, repo_dir: Path, ref: str, *, log_name: str) -> str:
+        """Return the commit revision for a ref."""
+        ...
+
+    def branch_ahead_behind(
+        self,
+        repo_dir: Path,
+        *,
+        branch: str,
+        base_branch: str,
+        log_name: str,
+    ) -> BranchAheadBehind:
+        """Return ahead and behind counts for a branch against origin/base."""
+        ...
+
+    def record_dirty_files(
+        self,
+        context: RunContext,
+        label: str,
+        repo_dir: Path,
+        branch: str,
+        *,
+        log_prefix: str | None = None,
+    ) -> RunContext:
+        """Append dirty files observed after an agent phase."""
+        ...
+
+
 class GitOperations:
     """Run workflow git commands through the shared command runner."""
 
-    def __init__(self, runner: CommandRunner) -> None:
+    def __init__(self, runner: CommandExecutor) -> None:
         """Create git operations backed by a command runner."""
         self.runner = runner
 

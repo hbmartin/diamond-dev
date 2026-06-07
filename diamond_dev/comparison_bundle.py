@@ -11,8 +11,8 @@ from loguru import logger
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from diamond_dev.executor import CommandRunner
-    from diamond_dev.git_ops import GitOperations
+    from diamond_dev.executor import CommandExecutor
+    from diamond_dev.git_ops import ComparisonGitOperations
     from diamond_dev.workflow import ImplementationBranch, RunContext
 
 
@@ -31,8 +31,8 @@ class _ChangedFile:
 def write_comparison_bundle(
     *,
     context: RunContext,
-    runner: CommandRunner,
-    git: GitOperations,
+    runner: CommandExecutor,
+    git: ComparisonGitOperations,
 ) -> RunContext:
     """Write the deterministic comparison bundle and return updated context."""
     diff_budget = _DiffBudget(
@@ -98,8 +98,8 @@ def _commit_subject(message: str) -> str:
 def _branch_section(
     *,
     context: RunContext,
-    runner: CommandRunner,
-    git: GitOperations,
+    runner: CommandExecutor,
+    git: ComparisonGitOperations,
     branch: ImplementationBranch,
     diff_budget: _DiffBudget,
 ) -> tuple[list[str], bool]:
@@ -243,7 +243,7 @@ def _changed_file_list_lines(
 def _test_lines(
     *,
     context: RunContext,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     branch: ImplementationBranch,
 ) -> tuple[list[str], bool]:
     if not context.config.comparison.test_commands:
@@ -285,7 +285,7 @@ def _test_lines(
 def _diff_lines(
     *,
     context: RunContext,
-    git: GitOperations,
+    git: ComparisonGitOperations,
     branch: ImplementationBranch,
     changed_files: Sequence[_ChangedFile],
     diff_budget: _DiffBudget,

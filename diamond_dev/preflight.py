@@ -18,7 +18,7 @@ from diamond_dev.naming import derive_wiki_repository_url, wiki_directory_name
 
 if TYPE_CHECKING:
     from diamond_dev.config import DiamondDevConfig
-    from diamond_dev.executor import CommandResult, CommandRunner
+    from diamond_dev.executor import CommandExecutor, CommandResult
 
 REQUIRED_CORE_CLI_NAMES: Final = ("git", "gh")
 _DOCTOR_GEMINI_PROMPT: Final = (
@@ -78,7 +78,7 @@ class PreflightSummary:
 
 def run_preflight(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     cwd: Path,
     config: DiamondDevConfig,
     required_cli_names: Sequence[str] = (),
@@ -96,7 +96,7 @@ def run_preflight(
 
 def run_doctor(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     cwd: Path,
     config: DiamondDevConfig,
     required_cli_names: Sequence[str] = (),
@@ -181,7 +181,7 @@ def _check_required_cli_names(*, cli_names: Sequence[str]) -> tuple[CliCheck, ..
 def _check_write_permissions(
     *,
     cwd: Path,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     wiki_dir: Path,
 ) -> tuple[WritePermissionCheck, ...]:
     checks: list[WritePermissionCheck] = []
@@ -201,7 +201,7 @@ def _check_write_permissions(
 def _write_permission_targets(
     *,
     cwd: Path,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     wiki_dir: Path,
 ) -> tuple[tuple[str, Path], ...]:
     log_dir = getattr(runner, "log_dir", None)
@@ -277,7 +277,7 @@ def _clean_up_failed_write_check_file(*, temp_file_path: Path) -> None:
 
 def _check_agent_auth(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     cwd: Path,
     config: DiamondDevConfig,
     required_cli_names: Sequence[str],
@@ -346,7 +346,7 @@ def _agent_auth_command(
 
 def _check_wiki_access(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     cwd: Path,
     wiki_url: str,
     wiki_dir: Path,
@@ -371,7 +371,7 @@ def _check_wiki_access(
 
 def _check_wiki_push_access(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     cwd: Path,
     wiki_url: str,
 ) -> CommandResult:

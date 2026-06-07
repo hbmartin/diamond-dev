@@ -51,6 +51,10 @@ def _job_permissions(job: object) -> dict[str, object]:
     return permissions
 
 
+def _assert_no_write_permissions(permissions: dict[str, object]) -> None:
+    assert all(value != "write" for value in permissions.values())
+
+
 def test_github_actions_are_pinned_to_full_commit_shas() -> None:
     mutable_references = [
         f"{path.relative_to(REPO_ROOT)}:{line_number}: {reference}"
@@ -62,16 +66,21 @@ def test_github_actions_are_pinned_to_full_commit_shas() -> None:
     assert mutable_references == []
 
 
+def test_ci_workflow_default_permissions_are_read_only() -> None:
+    workflow = _load_ci_workflow()
+    permissions = _required_mapping(workflow, "permissions")
+
+    assert permissions["contents"] == "read"
+    _assert_no_write_permissions(permissions)
+
+
 def test_ci_lint_job_permissions_are_read_only() -> None:
     workflow = _load_ci_workflow()
     jobs = _required_mapping(workflow, "jobs")
     lint_job = _required_mapping(jobs, "lint-type-test")
     permissions = _required_mapping(lint_job, "permissions")
 
-    assert "permissions" not in workflow
-    assert permissions["contents"] == "read"
-    assert permissions.get("issues") != "write"
-    assert all(value != "write" for value in permissions.values())
+    assert permissions == {"contents": "read"}
 
 
 def test_ci_pr_write_permission_is_isolated_to_pylint_comment_job() -> None:
@@ -81,7 +90,13 @@ def test_ci_pr_write_permission_is_isolated_to_pylint_comment_job() -> None:
     comment_permissions = _required_mapping(comment_job, "permissions")
 
     assert "lint-type-test" in jobs
+    assert comment_permissions["contents"] == "read"
     assert comment_permissions["pull-requests"] == "write"
+    assert [
+        scope
+        for scope, access in comment_permissions.items()
+        if scope != "pull-requests" and access == "write"
+    ] == []
     assert [
         job_name
         for job_name, job in jobs.items()

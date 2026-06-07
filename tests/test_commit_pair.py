@@ -125,8 +125,10 @@ def test_commit_pair_slug_discovers_wiki_index(tmp_path: Path) -> None:
     left = "a" * 40
     right = "b" * 40
     context = _context_for_pair(tmp_path, left_sha=left, right_sha=right)
+    commit_pair = context.commit_pair
+    assert commit_pair is not None
 
-    assert upsert_commit_pair_index(wiki_dir, context.commit_pair)
+    assert upsert_commit_pair_index(wiki_dir, commit_pair)
     slug = choose_commit_pair_slug(
         cwd=tmp_path,
         wiki_dir=wiki_dir,
@@ -137,7 +139,7 @@ def test_commit_pair_slug_discovers_wiki_index(tmp_path: Path) -> None:
         ),
     )
 
-    assert slug == context.commit_pair.slug
+    assert slug == commit_pair.slug
 
 
 def test_commit_pair_slug_falls_back_and_appends_on_collision(tmp_path: Path) -> None:
@@ -165,7 +167,9 @@ def test_commit_pair_slug_falls_back_and_appends_on_collision(tmp_path: Path) ->
 
 def test_comparison_marker_match_requires_ordered_pair(tmp_path: Path) -> None:
     context = _context_for_pair(tmp_path, left_sha="a" * 40, right_sha="b" * 40)
-    marker = context.commit_pair.marker
+    commit_pair = context.commit_pair
+    assert commit_pair is not None
+    marker = commit_pair.marker
     reversed_context = _context_for_pair(
         tmp_path,
         left_sha="b" * 40,
@@ -293,7 +297,7 @@ def test_resolve_commit_pair_inputs_normalizes_origin_url_variants(
     left, right = resolve_commit_pair_inputs(
         cwd=tmp_path,
         repository_url=repository_url,
-        runner=runner,  # type: ignore[arg-type]
+        runner=runner,
         commit_args=("remote-commit", "local-commit"),
     )
 
@@ -311,7 +315,7 @@ def test_resolve_commit_pair_inputs_handles_empty_resolved_ref_output(
         resolve_commit_pair_inputs(
             cwd=tmp_path,
             repository_url="git@github.com:owner/repo.git",
-            runner=runner,  # type: ignore[arg-type]
+            runner=runner,
             commit_args=("abc123", "def456"),
         )
 
@@ -325,7 +329,7 @@ def test_resolve_commit_pair_inputs_rejects_empty_short_sha_output(
         resolve_commit_pair_inputs(
             cwd=tmp_path,
             repository_url="git@github.com:owner/repo.git",
-            runner=runner,  # type: ignore[arg-type]
+            runner=runner,
             commit_args=("abc123", "def456"),
         )
 

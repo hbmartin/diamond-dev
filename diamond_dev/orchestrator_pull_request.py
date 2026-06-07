@@ -13,7 +13,7 @@ from diamond_dev.orchestrator_agents import agent_label, final_review_command
 from diamond_dev.report import PhaseWarning
 
 if TYPE_CHECKING:
-    from diamond_dev.executor import CommandRunner
+    from diamond_dev.executor import CommandRunnerLike
     from diamond_dev.git_ops import GitOperations
     from diamond_dev.providers import GitHubWorkflowProvider
     from diamond_dev.workflow import RunContext, SelectedImplementation
@@ -23,7 +23,7 @@ class PullRequestFinalizationMixin:
     """Finalize the selected implementation branch and open a pull request."""
 
     git: GitOperations
-    runner: CommandRunner
+    runner: CommandRunnerLike
     workflow_provider: GitHubWorkflowProvider
 
     def _finalize_pr(
