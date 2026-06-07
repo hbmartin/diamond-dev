@@ -194,10 +194,12 @@ def test_check_write_permission_reports_cleanup_failure(
 ) -> None:
     real_unlink = Path.unlink
     attempted_paths: list[Path] = []
+    attempted_missing_ok: list[bool] = []
 
     def unlink(path: Path, *, missing_ok: bool = False) -> None:
         if path.parent == tmp_path and path.name.startswith(".diamond-dev-doctor-"):
             attempted_paths.append(path)
+            attempted_missing_ok.append(missing_ok)
             raise OSError("permission denied")
         real_unlink(path, missing_ok=missing_ok)
 
@@ -213,6 +215,68 @@ def test_check_write_permission_reports_cleanup_failure(
         )
 
     assert attempted_paths
+    assert all(attempted_missing_ok)
     for attempted_path in attempted_paths:
         if attempted_path.exists():
             real_unlink(attempted_path)
+
+
+def test_check_write_permission_preserves_write_failure_when_cleanup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    temp_file_path = tmp_path / ".diamond-dev-doctor-failing.tmp"
+    real_unlink = Path.unlink
+    cleanup_missing_ok: list[bool] = []
+
+    class _FailingTemporaryFile:
+        name = str(temp_file_path)
+
+        def __enter__(self) -> Self:
+            temp_file_path.touch()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> bool:
+            return False
+
+        def write(self, text: str) -> int:
+            assert text == "ok\n"
+            raise OSError("disk full")
+
+        def flush(self) -> None:
+            pytest.fail("flush should not run after a failed write")
+
+    def named_temporary_file(**kwargs: object) -> _FailingTemporaryFile:
+        assert kwargs == {
+            "mode": "w",
+            "encoding": "utf-8",
+            "dir": tmp_path,
+            "prefix": ".diamond-dev-doctor-",
+            "suffix": ".tmp",
+            "delete": False,
+        }
+        return _FailingTemporaryFile()
+
+    def unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path == temp_file_path:
+            cleanup_missing_ok.append(missing_ok)
+            raise OSError("cleanup denied")
+        real_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(preflight.tempfile, "NamedTemporaryFile", named_temporary_file)
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    with pytest.raises(DiamondDevError, match=r"Doctor cannot write .*disk full") as exc:
+        preflight._check_write_permission(  # noqa: SLF001
+            label="workspace",
+            path=tmp_path,
+        )
+
+    assert "cleanup denied" not in str(exc.value)
+    assert cleanup_missing_ok == [True]
+    real_unlink(temp_file_path)
