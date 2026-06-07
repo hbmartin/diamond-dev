@@ -8,7 +8,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
@@ -23,6 +23,7 @@ from diamond_dev.workflow import (
     CommitPairContext,
     CommitPairEntry,
     RunContext,
+    safe_child_path,
 )
 
 if TYPE_CHECKING:
@@ -44,6 +45,7 @@ _INDEX_PATTERN: Final = re.compile(
     re.MULTILINE,
 )
 _LABEL_NAMES: Final = ("codex", "claude")
+_ORIGIN_REMOTE_PREFIX: Final = "origin/"
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,7 +270,7 @@ def upsert_commit_pair_index(
     commit_pair: CommitPairContext,
 ) -> bool:
     """Upsert the ordered commit-pair slug in the wiki index."""
-    index_path = wiki_dir / COMMIT_PAIR_INDEX_FILE_NAME
+    index_path = safe_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
     existing_text = (
         index_path.read_text(encoding="utf-8") if index_path.is_file() else ""
     )
@@ -482,8 +484,8 @@ def _resolve_ref(
 
 def _candidate_refs(commit_arg: str) -> tuple[str, ...]:
     candidates = [commit_arg]
-    if not commit_arg.startswith(("origin/", "refs/")):
-        candidates.append(f"origin/{commit_arg}")
+    if not commit_arg.startswith((_ORIGIN_REMOTE_PREFIX, "refs/")):
+        candidates.append(f"{_ORIGIN_REMOTE_PREFIX}{commit_arg}")
     return tuple(dict.fromkeys(candidates))
 
 
@@ -561,9 +563,9 @@ def _normalize_branch_names(ref_names: Iterable[str]) -> tuple[str, ...]:
     for ref_name in ref_names:
         clean_ref = ref_name.strip().lstrip("*").strip()
         clean_ref = clean_ref.removeprefix("remotes/")
-        if clean_ref == "origin/HEAD" or " -> " in clean_ref:
+        if clean_ref == f"{_ORIGIN_REMOTE_PREFIX}HEAD" or " -> " in clean_ref:
             continue
-        clean_ref = clean_ref.removeprefix("origin/")
+        clean_ref = clean_ref.removeprefix(_ORIGIN_REMOTE_PREFIX)
         if clean_ref and clean_ref not in normalized:
             normalized.append(clean_ref)
     return tuple(normalized)
@@ -591,7 +593,7 @@ def _normalize_explicit_branch_name(commit_arg: str) -> str:
     return (
         commit_arg.removeprefix("refs/heads/")
         .removeprefix("refs/remotes/origin/")
-        .removeprefix("origin/")
+        .removeprefix(_ORIGIN_REMOTE_PREFIX)
     )
 
 
@@ -735,7 +737,16 @@ def _entry_with_generated_branch(
     entry: CommitPairEntry,
     slug: str,
 ) -> CommitPairEntry:
-    return replace(entry, branch=generated_commit_pair_branch(slug, entry.label))
+    return CommitPairEntry(
+        original_arg=entry.original_arg,
+        sha=entry.sha,
+        short_sha=entry.short_sha,
+        message=entry.message,
+        ref_names=entry.ref_names,
+        label=entry.label,
+        branch=generated_commit_pair_branch(slug, entry.label),
+        source=entry.source,
+    )
 
 
 def _has_duplicate_branches(entries: Sequence[CommitPairEntry]) -> bool:
@@ -785,7 +796,7 @@ def _slug_used_for_different_pair(
     left_sha: str,
     right_sha: str,
 ) -> bool:
-    comparison_path = wiki_dir / f"{slug}-comparison.md"
+    comparison_path = safe_child_path(wiki_dir, f"{slug}-comparison.md")
     if comparison_path.is_file():
         comparison_records = _records_from_text(
             comparison_path.read_text(encoding="utf-8"),
@@ -802,7 +813,7 @@ def _slug_used_for_different_pair(
 
 def _iter_commit_pair_records(wiki_dir: Path) -> tuple[CommitPairRecord, ...]:
     records: list[CommitPairRecord] = []
-    index_path = wiki_dir / COMMIT_PAIR_INDEX_FILE_NAME
+    index_path = safe_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
     if index_path.is_file():
         records.extend(_records_from_text(index_path.read_text(encoding="utf-8")))
     if wiki_dir.is_dir():

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -57,6 +57,23 @@ class PlanContext:
     def review_judgments_file_name(self) -> str:
         """Return the structured review judgment sidecar filename."""
         return f"{self.slug}-review-judgments.json"
+
+
+def safe_child_path(directory: Path, child_name: str) -> Path:
+    """Return a resolved child path that cannot escape its parent directory."""
+    child_path = Path(child_name)
+    if not child_name or child_path.is_absolute() or child_path.name != child_name:
+        raise DiamondDevError(f"Unsafe child path: {child_name!r}")
+
+    resolved_directory = directory.resolve(strict=False)
+    resolved_child = (resolved_directory / child_path).resolve(strict=False)
+    try:
+        resolved_child.relative_to(resolved_directory)
+    except (ValueError,) as error:
+        raise DiamondDevError(
+            f"Child path escapes parent directory: {child_name!r}",
+        ) from error
+    return resolved_child
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,7 +169,10 @@ class ImplementationContext:
 
     def with_base_branch(self, base_branch: str) -> ImplementationContext:
         """Return a copy with the resolved remote base branch."""
-        return replace(self, base_branch=base_branch)
+        return ImplementationContext(
+            branches=self.branches,
+            base_branch=base_branch,
+        )
 
     @property
     def implementer_names(self) -> tuple[str, ...]:
@@ -218,19 +238,28 @@ class RunContext:
     @property
     def comparison_file(self) -> Path:
         """Return the local comparison artifact path."""
-        return self.cwd / "comparison.md"
+        return safe_child_path(self.cwd, "comparison.md")
 
     @property
     def comparison_bundle_file(self) -> Path:
         """Return the local comparison bundle artifact path."""
-        return self.cwd / self.plan.comparison_bundle_file_name
+        return safe_child_path(self.cwd, self.plan.comparison_bundle_file_name)
 
     def with_implementation(
         self,
         implementation: ImplementationContext,
     ) -> RunContext:
         """Return a copy with updated implementation repository details."""
-        return replace(self, implementation=implementation)
+        return RunContext(
+            cwd=self.cwd,
+            config=self.config,
+            plan=self.plan,
+            wiki=self.wiki,
+            implementation=implementation,
+            commit_pair=self.commit_pair,
+            dirty_records=self.dirty_records,
+            pr_url=self.pr_url,
+        )
 
     def with_commit_pair_entries(
         self,
@@ -243,33 +272,59 @@ class RunContext:
             raise DiamondDevError(
                 "Commit-pair entries must match implementation branches",
             )
-        implementation = replace(
-            self.implementation,
+        commit_pair = self.commit_pair
+        implementation = ImplementationContext(
             branches=tuple(
-                replace(branch, branch=entry.branch)
+                ImplementationBranch(
+                    agent_name=branch.agent_name,
+                    repo_dir=branch.repo_dir,
+                    branch=entry.branch,
+                    log_prefix=branch.log_prefix,
+                )
                 for branch, entry in zip(
                     self.implementation.branches,
                     entries,
                     strict=True,
                 )
             ),
+            base_branch=self.implementation.base_branch,
         )
-        return replace(
-            self,
-            commit_pair=replace(self.commit_pair, entries=entries),
+        return RunContext(
+            cwd=self.cwd,
+            config=self.config,
+            plan=self.plan,
+            wiki=self.wiki,
             implementation=implementation,
+            commit_pair=CommitPairContext(slug=commit_pair.slug, entries=entries),
+            dirty_records=self.dirty_records,
+            pr_url=self.pr_url,
         )
 
     def with_dirty_record(self, dirty_record: DirtyRecord) -> RunContext:
         """Return a copy with an added dirty-file record."""
-        return replace(
-            self,
+        return RunContext(
+            cwd=self.cwd,
+            config=self.config,
+            plan=self.plan,
+            wiki=self.wiki,
+            implementation=self.implementation,
+            commit_pair=self.commit_pair,
             dirty_records=(*self.dirty_records, dirty_record),
+            pr_url=self.pr_url,
         )
 
     def with_pr_url(self, pr_url: str) -> RunContext:
         """Return a copy with the created pull request URL."""
-        return replace(self, pr_url=pr_url)
+        return RunContext(
+            cwd=self.cwd,
+            config=self.config,
+            plan=self.plan,
+            wiki=self.wiki,
+            implementation=self.implementation,
+            commit_pair=self.commit_pair,
+            dirty_records=self.dirty_records,
+            pr_url=pr_url,
+        )
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -336,14 +391,7 @@ def build_run_context(
         cwd=cwd,
         config=config,
         plan=PlanContext(path=plan_path, slug=plan_slug),
-        wiki=WikiContext(
-            url=wiki_url,
-            directory=wiki_dir,
-            comparison_file=wiki_dir / f"{plan_slug}-comparison.md",
-            comparison_bundle_file=wiki_dir / f"{plan_slug}-comparison-bundle.md",
-            review_file=wiki_dir / f"{plan_slug}-review.md",
-            review_judgments_file=wiki_dir / f"{plan_slug}-review-judgments.json",
-        ),
+        wiki=_wiki_context(wiki_url=wiki_url, wiki_dir=wiki_dir, slug=plan_slug),
         implementation=ImplementationContext(
             branches=tuple(
                 _implementation_branch(cwd, plan_slug, agent_name)
@@ -368,20 +416,13 @@ def build_commit_pair_run_context(
     return RunContext(
         cwd=cwd,
         config=config,
-        plan=PlanContext(path=cwd / f"{slug}.md", slug=slug),
-        wiki=WikiContext(
-            url=wiki_url,
-            directory=wiki_dir,
-            comparison_file=wiki_dir / f"{slug}-comparison.md",
-            comparison_bundle_file=wiki_dir / f"{slug}-comparison-bundle.md",
-            review_file=wiki_dir / f"{slug}-review.md",
-            review_judgments_file=wiki_dir / f"{slug}-review-judgments.json",
-        ),
+        plan=PlanContext(path=safe_child_path(cwd, f"{slug}.md"), slug=slug),
+        wiki=_wiki_context(wiki_url=wiki_url, wiki_dir=wiki_dir, slug=slug),
         implementation=ImplementationContext(
             branches=tuple(
                 ImplementationBranch(
                     agent_name=entry.label,
-                    repo_dir=cwd / f"{entry.label}-{slug}",
+                    repo_dir=safe_child_path(cwd, f"{entry.label}-{slug}"),
                     branch=entry.branch,
                     log_prefix=entry.label,
                 )
@@ -417,9 +458,26 @@ def _implementation_branch(
 ) -> ImplementationBranch:
     return ImplementationBranch(
         agent_name=agent_name,
-        repo_dir=cwd / f"{agent_name}-{plan_slug}",
+        repo_dir=safe_child_path(cwd, f"{agent_name}-{plan_slug}"),
         branch=f"{agent_name}/{plan_slug}",
         log_prefix=agent_name,
+    )
+
+
+def _wiki_context(*, wiki_url: str, wiki_dir: Path, slug: str) -> WikiContext:
+    return WikiContext(
+        url=wiki_url,
+        directory=wiki_dir,
+        comparison_file=safe_child_path(wiki_dir, f"{slug}-comparison.md"),
+        comparison_bundle_file=safe_child_path(
+            wiki_dir,
+            f"{slug}-comparison-bundle.md",
+        ),
+        review_file=safe_child_path(wiki_dir, f"{slug}-review.md"),
+        review_judgments_file=safe_child_path(
+            wiki_dir,
+            f"{slug}-review-judgments.json",
+        ),
     )
 
 

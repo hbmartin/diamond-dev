@@ -4,13 +4,45 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from diamond_dev.config import (
     AgentConfig,
     AgentConfigs,
     DiamondDevConfig,
     WorkflowConfig,
 )
-from diamond_dev.workflow import build_run_context, selected_implementation
+from diamond_dev.errors import DiamondDevError
+from diamond_dev.workflow import (
+    build_run_context,
+    safe_child_path,
+    selected_implementation,
+)
+
+
+def test_safe_child_path_returns_child_under_parent(tmp_path: Path) -> None:
+    assert safe_child_path(tmp_path, "artifact.md") == tmp_path / "artifact.md"
+
+
+@pytest.mark.parametrize(
+    "child_name",
+    [
+        "",
+        "../artifact.md",
+        "nested/artifact.md",
+    ],
+)
+def test_safe_child_path_rejects_unsafe_names(
+    tmp_path: Path,
+    child_name: str,
+) -> None:
+    with pytest.raises(DiamondDevError, match="Unsafe child path"):
+        safe_child_path(tmp_path, child_name)
+
+
+def test_safe_child_path_rejects_absolute_names(tmp_path: Path) -> None:
+    with pytest.raises(DiamondDevError, match="Unsafe child path"):
+        safe_child_path(tmp_path, str(tmp_path / "artifact.md"))
 
 
 def test_build_run_context_uses_effective_wiki_url_for_directory(

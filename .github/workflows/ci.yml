@@ -5,13 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   lint-type-test:
     name: Lint, type check, and test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       pylint_exit_code: ${{ steps.pylint.outputs.exit_code }}
 
