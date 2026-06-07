@@ -42,6 +42,9 @@ rules:
           - pattern-inside: |
               def safe_generated_child_path($DIRECTORY, $CHILD_NAME):
                   ...
+          - pattern-inside: |
+              def _resolved_child_path($DIRECTORY, $CHILD_NAME, ...):
+                  ...
       - pattern-either:
-          - pattern: $DIRECTORY / $CHILD_NAME
-          - pattern: $DIRECTORY.joinpath($CHILD_NAME)
+          - pattern: $PARENT / $CHILD_NAME
+          - pattern: $PARENT.joinpath($CHILD_NAME)
