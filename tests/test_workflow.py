@@ -32,6 +32,7 @@ def test_safe_child_path_returns_child_under_parent(tmp_path: Path) -> None:
     [
         "",
         "../artifact.md",
+        "artifact?.md",
         "nested/artifact.md",
     ],
 )

@@ -28,3 +28,16 @@ rules:
               $TARGET = safe_child_path($DIR, $SOURCE.name)
               ...
               shutil.copy2($TARGET, ...)
+
+  - id: diamond-dev.safe-child-path-raw-child-name-join
+    languages:
+      - python
+    message: Validate child_name before joining it with a parent directory in safe_child_path.
+    severity: ERROR
+    patterns:
+      - pattern-inside: |
+          def safe_child_path(...):
+              ...
+      - pattern-either:
+          - pattern: $DIRECTORY / child_name
+          - pattern: $DIRECTORY.joinpath(child_name)

@@ -25,7 +25,6 @@ from diamond_dev.review_judgments import (
 )
 from diamond_dev.workflow import (
     copy_child_file,
-    read_child_text,
     safe_child_path,
     write_child_text,
 )
@@ -215,13 +214,10 @@ class ReviewPhasesMixin:
         )
 
     def _promote_review_file(self, context: RunContext, review_file: Path) -> None:
-        review_file = safe_child_path(review_file.parent, review_file.name)
         if review_file.name != context.plan.review_file_name:
             raise DiamondDevError(f"Unexpected review file: {review_file}")
-        review_markdown = read_child_text(
-            review_file.parent,
-            context.plan.review_file_name,
-        )
+        review_file = safe_child_path(review_file.parent, context.plan.review_file_name)
+        review_markdown = review_file.read_text(encoding="utf-8")
         review_judgments_file = safe_child_path(
             review_file.parent,
             context.plan.review_judgments_file_name,

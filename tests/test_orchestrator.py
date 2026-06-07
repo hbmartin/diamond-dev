@@ -2253,6 +2253,19 @@ def test_promote_review_file_warns_only_when_sidecar_missing(
     assert not context.wiki.review_judgments_file.exists()
 
 
+def test_promote_review_file_rejects_unexpected_file_name(tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    review_file = selected_repo / "other-review.md"
+    review_file.write_text("Review\n", encoding="utf-8")
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    with pytest.raises(DiamondDevError, match="Unexpected review file"):
+        orchestrator._promote_review_file(context, review_file)  # noqa: SLF001
+
+
 def test_promote_review_file_renders_and_copies_valid_sidecar(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
