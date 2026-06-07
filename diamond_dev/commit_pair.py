@@ -27,7 +27,7 @@ from diamond_dev.workflow import (
 )
 
 if TYPE_CHECKING:
-    from diamond_dev.executor import CommandRunner
+    from diamond_dev.executor import CommandExecutor
 
 COMMIT_PAIR_INDEX_FILE_NAME: Final = "diamond-dev-commit-comparisons.md"
 _COMMIT_SHA_PATTERN: Final = r"[0-9a-f]{40}"
@@ -69,7 +69,7 @@ def resolve_commit_pair_inputs(
     *,
     cwd: Path,
     repository_url: str,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     commit_args: tuple[str, str],
 ) -> tuple[ResolvedCommitInput, ResolvedCommitInput]:
     """Resolve two commit-ish arguments through remote then trusted local fallback."""
@@ -210,7 +210,7 @@ def choose_commit_pair_slug(
     *,
     cwd: Path,
     wiki_dir: Path,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     resolved: tuple[ResolvedCommitInput, ResolvedCommitInput],
 ) -> str:
     """Discover or generate a stable slug for an ordered commit pair."""
@@ -299,7 +299,7 @@ def _resolve_one_input(  # noqa: PLR0913
     cwd: Path,
     resolver_dir: Path,
     repository_url: str,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     commit_arg: str,
     index: int,
 ) -> ResolvedCommitInput:
@@ -337,7 +337,7 @@ def _resolve_one_input(  # noqa: PLR0913
 
 def _resolve_in_resolver(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     resolver_dir: Path,
     commit_arg: str,
     index: int,
@@ -365,7 +365,7 @@ def _resolve_from_local_fallback(
     *,
     cwd: Path,
     resolver_dir: Path,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     commit_arg: str,
     index: int,
 ) -> ResolvedCommitInput | None:
@@ -404,7 +404,7 @@ def _resolve_from_local_fallback(
 
 def _commit_metadata(  # noqa: PLR0913
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     commit_arg: str,
     sha: str,
@@ -447,7 +447,7 @@ def _commit_metadata(  # noqa: PLR0913
 
 def _resolve_commitish(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     commit_arg: str,
     log_prefix: str,
@@ -465,7 +465,7 @@ def _resolve_commitish(
 
 def _resolve_ref(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     ref: str,
     log_name: str,
@@ -490,7 +490,7 @@ def _candidate_refs(commit_arg: str) -> tuple[str, ...]:
 
 
 def _short_sha(
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     sha: str,
     *,
@@ -508,7 +508,7 @@ def _short_sha(
 
 
 def _commit_message(
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     sha: str,
     *,
@@ -523,7 +523,7 @@ def _commit_message(
 
 
 def _containing_ref_names(
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     sha: str,
     *,
@@ -543,7 +543,7 @@ def _containing_ref_names(
 def _local_ref_names(
     *,
     cwd: Path,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     sha: str,
     log_prefix: str,
 ) -> tuple[str, ...]:
@@ -573,7 +573,7 @@ def _normalize_branch_names(ref_names: Iterable[str]) -> tuple[str, ...]:
 
 def _explicit_branch_for_arg(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     commit_arg: str,
     log_prefix: str,
@@ -599,7 +599,7 @@ def _normalize_explicit_branch_name(commit_arg: str) -> str:
 
 def _branch_ref_exists(
     *,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     repo_dir: Path,
     branch: str,
     log_name: str,
@@ -620,7 +620,7 @@ def _cwd_origin_matches(
     *,
     cwd: Path,
     repository_url: str,
-    runner: CommandRunner,
+    runner: CommandExecutor,
 ) -> bool:
     if not shutil.which("git"):
         return False
@@ -757,7 +757,7 @@ def _has_duplicate_branches(entries: Sequence[CommitPairEntry]) -> bool:
 def _codex_generated_slug(
     *,
     cwd: Path,
-    runner: CommandRunner,
+    runner: CommandExecutor,
     left: ResolvedCommitInput,
     right: ResolvedCommitInput,
 ) -> str | None:

@@ -125,8 +125,8 @@ def test_comparison_bundle_records_two_branches_without_tests(
 
     updated_context = write_comparison_bundle(
         context=context,
-        runner=runner,  # type: ignore[arg-type]
-        git=git,  # type: ignore[arg-type]
+        runner=runner,
+        git=git,
     )
 
     bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
@@ -180,8 +180,8 @@ def test_comparison_bundle_uses_commit_subjects_for_pair_identity(
 
     write_comparison_bundle(
         context=context,
-        runner=runner,  # type: ignore[arg-type]
-        git=git,  # type: ignore[arg-type]
+        runner=runner,
+        git=git,
     )
 
     bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
@@ -220,8 +220,8 @@ def test_comparison_bundle_records_configured_test_results_and_dirty_files(
 
     updated_context = write_comparison_bundle(
         context=context,
-        runner=runner,  # type: ignore[arg-type]
-        git=git,  # type: ignore[arg-type]
+        runner=runner,
+        git=git,
     )
 
     bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
@@ -277,8 +277,8 @@ def test_comparison_bundle_reports_capped_lists_and_diffs(tmp_path: Path) -> Non
 
     write_comparison_bundle(
         context=context,
-        runner=runner,  # type: ignore[arg-type]
-        git=git,  # type: ignore[arg-type]
+        runner=runner,
+        git=git,
     )
 
     bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
@@ -308,8 +308,8 @@ def test_comparison_bundle_reports_all_changed_files_omitted_by_budget(
 
     write_comparison_bundle(
         context=context,
-        runner=runner,  # type: ignore[arg-type]
-        git=git,  # type: ignore[arg-type]
+        runner=runner,
+        git=git,
     )
 
     bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
@@ -337,8 +337,8 @@ def test_comparison_bundle_uses_utf8_bytes_for_changed_file_budget(
 
     write_comparison_bundle(
         context=context,
-        runner=runner,  # type: ignore[arg-type]
-        git=git,  # type: ignore[arg-type]
+        runner=runner,
+        git=git,
     )
 
     bundle = context.comparison_bundle_file.read_text(encoding="utf-8")

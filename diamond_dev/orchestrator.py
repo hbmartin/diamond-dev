@@ -34,7 +34,8 @@ from diamond_dev.executor import (
     CommandLogRecord,
     CommandResult,
     CommandRunner,
-    ManagedProcess,
+    CommandRunnerLike,
+    StartedCommand,
 )
 from diamond_dev.git_ops import GitOperations
 from diamond_dev.markdown import read_normalized_markdown
@@ -107,7 +108,7 @@ class DiamondDevOrchestrator(
         cwd: Path | None = None,
         config_path: Path | None = None,
         report_path: Path | None = None,
-        runner: CommandRunner | None = None,
+        runner: CommandRunnerLike | None = None,
         workflow_provider: GitHubWorkflowProvider | None = None,
         review_provider: ReviewProvider | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -461,7 +462,7 @@ class DiamondDevOrchestrator(
             context.plan.file_name,
             configured_prompt,
         )
-        processes: list[tuple[ImplementationBranch, ManagedProcess]] = []
+        processes: list[tuple[ImplementationBranch, StartedCommand]] = []
         for agent_branch in missing_agents:
             self._ensure_agent_plan_copy(context, agent_branch.repo_dir)
             processes.append(

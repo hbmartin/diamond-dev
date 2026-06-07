@@ -9,7 +9,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import IO
+from typing import IO, Protocol
 
 from loguru import logger
 
@@ -35,6 +35,84 @@ class CommandLogRecord:
     command: tuple[str, ...]
     cwd: Path
     log_path: Path
+
+
+class StartedCommand(Protocol):
+    """Started command object that can be waited on."""
+
+    def wait(self) -> CommandResult:
+        """Wait for command completion."""
+        ...
+
+
+class CommandExecutor(Protocol):
+    """Synchronous command runner boundary."""
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        """Run a command and return its result."""
+        ...
+
+
+class FileCommandExecutor(Protocol):
+    """Command runner boundary for commands that write output to a file."""
+
+    def run_to_file(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        output_path: Path,
+        check: bool = True,
+    ) -> CommandResult:
+        """Run a command and write captured output to a file."""
+        ...
+
+
+class AsyncCommandExecutor(Protocol):
+    """Command runner boundary for background commands."""
+
+    def start(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+    ) -> StartedCommand:
+        """Start a command and return a waitable process."""
+        ...
+
+
+class InteractiveCommandExecutor(Protocol):
+    """Command runner boundary for interactive commands."""
+
+    def run_interactive(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        log_name: str,
+        check: bool = True,
+    ) -> CommandResult:
+        """Run an interactive command."""
+        ...
+
+
+class CommandRunnerLike(
+    CommandExecutor,
+    FileCommandExecutor,
+    AsyncCommandExecutor,
+    InteractiveCommandExecutor,
+    Protocol,
+):
+    """Complete command runner boundary used by orchestration."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +211,7 @@ class CommandRunner:
         *,
         cwd: Path,
         log_name: str,
-    ) -> ManagedProcess:
+    ) -> StartedCommand:
         """Start a command and begin streaming output asynchronously."""
         command_tuple = tuple(command)
         log_path = self._log_path(log_name)

@@ -16,8 +16,8 @@ from diamond_dev.commands import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from diamond_dev.executor import CommandResult, CommandRunner
-    from diamond_dev.git_ops import GitOperations
+    from diamond_dev.executor import CommandExecutor, CommandResult, FileCommandExecutor
+    from diamond_dev.git_ops import GitHubGitOperations
     from diamond_dev.pr import ExistingPullRequest
     from diamond_dev.workflow import SelectedImplementation
 
@@ -33,7 +33,12 @@ class CreatedPullRequest:
 class GitHubWorkflowProvider:
     """Current GitHub workflow operations backed by git and gh commands."""
 
-    def __init__(self, *, runner: CommandRunner, git: GitOperations) -> None:
+    def __init__(
+        self,
+        *,
+        runner: CommandExecutor,
+        git: GitHubGitOperations,
+    ) -> None:
         """Create a provider backed by existing command helpers."""
         self.runner = runner
         self.git = git
@@ -110,7 +115,7 @@ class GitHubWorkflowProvider:
 class ReviewProvider:
     """Current raw review provider operation backed by an external command."""
 
-    def __init__(self, *, runner: CommandRunner) -> None:
+    def __init__(self, *, runner: FileCommandExecutor) -> None:
         """Create a review provider backed by the shared runner."""
         self.runner = runner
 

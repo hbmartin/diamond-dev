@@ -97,7 +97,7 @@ class _FakeGit:
 def test_github_workflow_provider_delegates_wiki_operations(tmp_path: Path) -> None:
     runner = _FakeRunner(tmp_path)
     git = _FakeGit()
-    provider = GitHubWorkflowProvider(runner=runner, git=git)  # type: ignore[arg-type]
+    provider = GitHubWorkflowProvider(runner=runner, git=git)
 
     provider.sync_wiki(tmp_path / "repo.wiki")
     provider.push_wiki(tmp_path / "repo.wiki", log_name="wiki-push")
@@ -111,7 +111,7 @@ def test_github_workflow_provider_delegates_wiki_operations(tmp_path: Path) -> N
 def test_github_workflow_provider_delegates_branch_lookup(tmp_path: Path) -> None:
     runner = _FakeRunner(tmp_path)
     git = _FakeGit()
-    provider = GitHubWorkflowProvider(runner=runner, git=git)  # type: ignore[arg-type]
+    provider = GitHubWorkflowProvider(runner=runner, git=git)
 
     exists = provider.remote_workflow_branch_exists(
         tmp_path,
@@ -135,8 +135,8 @@ def test_github_workflow_provider_uses_existing_gh_pr_commands(
     tmp_path: Path,
 ) -> None:
     runner = _FakeRunner(tmp_path)
-    git = GitOperations(runner)  # type: ignore[arg-type]
-    provider = GitHubWorkflowProvider(runner=runner, git=git)  # type: ignore[arg-type]
+    git = GitOperations(runner)
+    provider = GitHubWorkflowProvider(runner=runner, git=git)
     selected = SelectedImplementation(
         accepted_agent="codex",
         comparison_fixer="claude",
@@ -221,7 +221,7 @@ def test_github_workflow_provider_uses_existing_gh_pr_commands(
 def test_review_provider_writes_raw_review_markdown(tmp_path: Path) -> None:
     runner = _FakeRunner(tmp_path)
     runner.next_output = "# Review\n"
-    provider = ReviewProvider(runner=runner)  # type: ignore[arg-type]
+    provider = ReviewProvider(runner=runner)
     output_path = tmp_path / "review.md"
 
     result = provider.run_review(

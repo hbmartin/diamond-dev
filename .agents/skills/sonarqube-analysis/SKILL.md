@@ -13,16 +13,16 @@ description: Inspect SonarQube Cloud/SonarCloud findings for this repository usi
 2. Prefer the bundled script:
 
    ```bash
-   python3 .agents/skills/sonarqube-analysis/scripts/sonar_report.py --format markdown
+   uv run .agents/skills/sonarqube-analysis/scripts/sonar_report.py --format markdown
    ```
 
 3. If the user asks for a focused slice, pass one or more flags:
 
    ```bash
-   python3 .agents/skills/sonarqube-analysis/scripts/sonar_report.py --bugs --security
-   python3 .agents/skills/sonarqube-analysis/scripts/sonar_report.py --new-code
-   python3 .agents/skills/sonarqube-analysis/scripts/sonar_report.py --branch trunk --top 20
-   python3 .agents/skills/sonarqube-analysis/scripts/sonar_report.py --project hbmartin_diamond-dev
+   uv run .agents/skills/sonarqube-analysis/scripts/sonar_report.py --bugs --security
+   uv run .agents/skills/sonarqube-analysis/scripts/sonar_report.py --new-code
+   uv run .agents/skills/sonarqube-analysis/scripts/sonar_report.py --branch main --top 20
+   uv run .agents/skills/sonarqube-analysis/scripts/sonar_report.py --project hbmartin_diamond-dev
    ```
 
 4. Summarize findings in this order:
@@ -49,6 +49,6 @@ The script expects these keys:
 SONAR_HOST_URL=https://sonarcloud.io
 SONAR_ORG=...
 SONAR_PROJECT_KEY=...
-SONAR_BRANCH=trunk
+SONAR_BRANCH=main
 SONAR_TOKEN=...
 ```

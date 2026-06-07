@@ -6,7 +6,6 @@ import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -35,9 +34,6 @@ from diamond_dev.workflow import (
     SelectedImplementation,
     WikiContext,
 )
-
-if TYPE_CHECKING:
-    from diamond_dev.orchestrator_repositories import ResumeAgentBranch
 
 
 class _RecordingRunner:
@@ -465,6 +461,39 @@ def build_context(tmp_path: Path) -> RunContext:
             base_branch="main",
         ),
     )
+
+
+def build_commit_pair_context(tmp_path: Path) -> RunContext:
+    entries = (
+        CommitPairEntry(
+            label="a",
+            original_arg="a" * 40,
+            sha="a" * 40,
+            short_sha="aaaaaaaaaaaa",
+            message="Left",
+            ref_names=(),
+            branch="diamond-dev/commit-compare/a",
+        ),
+        CommitPairEntry(
+            label="b",
+            original_arg="b" * 40,
+            sha="b" * 40,
+            short_sha="bbbbbbbbbbbb",
+            message="Right",
+            ref_names=(),
+            branch="diamond-dev/commit-compare/b",
+        ),
+    )
+    context = workflow.build_commit_pair_run_context(
+        cwd=tmp_path,
+        slug="commit-compare",
+        entries=entries,
+        config=DiamondDevConfig(
+            config_path=tmp_path / ".diamond-dev.toml",
+            repository_url="git@github.com:owner/repo.git",
+        ),
+    )
+    return context.with_implementation(context.implementation.with_base_branch("main"))
 
 
 def _prepare_clones_for_lockfiles(
@@ -969,6 +998,246 @@ def test_clone_commit_pair_repositories_generates_branch_for_base_candidate(
     assert checkout_commands[0][3] == "diamond-dev/commit-compare/a"
 
 
+def test_ensure_wiki_repo_at_rejects_existing_non_git_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wiki_dir = tmp_path / "repo.wiki"
+    wiki_dir.mkdir()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.git, "is_git_repo", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(DiamondDevError, match="Existing wiki path is not a Git repo"):
+        orchestrator._ensure_wiki_repo_at(  # noqa: SLF001
+            cwd=tmp_path,
+            wiki_url="git@github.com:owner/repo.wiki.git",
+            wiki_dir=wiki_dir,
+        )
+
+
+def test_prepare_commit_pair_clones_fails_when_one_clone_missing(
+    tmp_path: Path,
+) -> None:
+    context = build_commit_pair_context(tmp_path)
+    context.implementation.branches[0].repo_dir.mkdir()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    with pytest.raises(DiamondDevError, match="missing commit comparison clone"):
+        orchestrator._prepare_commit_pair_clones(context)  # noqa: SLF001
+
+
+def test_prepare_commit_pair_clones_resumes_existing_clones(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_commit_pair_context(tmp_path)
+    for branch in context.implementation.branches:
+        branch.repo_dir.mkdir()
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    validated_branches: list[str] = []
+
+    def validate_resume_clone(
+        _context: RunContext,
+        agent_branch: ImplementationBranch,
+    ) -> None:
+        validated_branches.append(agent_branch.branch)
+
+    monkeypatch.setattr(orchestrator, "_validate_resume_clone", validate_resume_clone)
+    monkeypatch.setattr(orchestrator.git, "remote_default_branch", lambda _repo_dir: "main")
+
+    updated_context = orchestrator._prepare_commit_pair_clones(context)  # noqa: SLF001
+
+    assert updated_context.implementation.base_branch == "main"
+    assert validated_branches == [
+        "diamond-dev/commit-compare/a",
+        "diamond-dev/commit-compare/b",
+    ]
+    assert _install_calls(runner) == []
+
+
+def test_commit_pair_branch_adjustment_requires_metadata(tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    with pytest.raises(DiamondDevError, match="requires metadata"):
+        orchestrator._with_commit_pair_branches_avoiding_base(context)  # noqa: SLF001
+
+
+def test_commit_pair_branch_adjustment_keeps_non_base_entries(
+    tmp_path: Path,
+) -> None:
+    context = build_commit_pair_context(tmp_path)
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+
+    updated_context = orchestrator._with_commit_pair_branches_avoiding_base(context)  # noqa: SLF001
+
+    assert updated_context is context
+
+
+def test_validate_resume_clone_accepts_matching_local_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    agent_branch = context.implementation.branches[0]
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    calls: list[str] = []
+
+    monkeypatch.setattr(orchestrator.git, "is_git_repo", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "origin_url",
+        lambda *_args, **_kwargs: context.config.repository_url,
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "fetch",
+        lambda *_args, **_kwargs: calls.append("fetch"),
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "local_branch_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "checkout_existing_branch",
+        lambda *_args, **_kwargs: calls.append("checkout"),
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "remote_branch_exists",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "branches_match_remote",
+        lambda *_args, **_kwargs: pytest.fail("branch match should not be checked"),
+    )
+
+    orchestrator._validate_resume_clone(context, agent_branch)  # noqa: SLF001
+
+    assert calls == ["fetch", "checkout"]
+
+
+def test_validate_resume_clone_rejects_origin_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    agent_branch = context.implementation.branches[0]
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.git, "is_git_repo", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "origin_url",
+        lambda *_args, **_kwargs: "git@github.com:other/repo.git",
+    )
+
+    with pytest.raises(DiamondDevError, match="origin mismatch"):
+        orchestrator._validate_resume_clone(context, agent_branch)  # noqa: SLF001
+
+
+def test_validate_resume_clone_rejects_missing_local_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    agent_branch = context.implementation.branches[0]
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.git, "is_git_repo", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "origin_url",
+        lambda *_args, **_kwargs: context.config.repository_url,
+    )
+    monkeypatch.setattr(orchestrator.git, "fetch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "local_branch_exists",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(DiamondDevError, match="local workflow branch is missing"):
+        orchestrator._validate_resume_clone(context, agent_branch)  # noqa: SLF001
+
+
+def test_validate_resume_clone_rejects_divergent_remote_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    agent_branch = context.implementation.branches[0]
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.git, "is_git_repo", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "origin_url",
+        lambda *_args, **_kwargs: context.config.repository_url,
+    )
+    monkeypatch.setattr(orchestrator.git, "fetch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "local_branch_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "checkout_existing_branch",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "remote_branch_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        orchestrator.git,
+        "branches_match_remote",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(DiamondDevError, match="divergent workflow branch"):
+        orchestrator._validate_resume_clone(context, agent_branch)  # noqa: SLF001
+
+
+def test_checkout_commit_pair_branch_fetches_local_commit_and_uses_remote_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_commit_pair_context(tmp_path)
+    assert context.commit_pair is not None
+    branch = context.implementation.branches[0]
+    entry = replace(context.commit_pair.entries[0], source="local")
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    monkeypatch.setattr(
+        orchestrator.git,
+        "remote_branch_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    orchestrator._checkout_commit_pair_branch(context, branch, entry)  # noqa: SLF001
+
+    assert (
+        "git",
+        "fetch",
+        str(context.cwd),
+        entry.sha,
+    ) in runner.commands
+    checkout_command = next(
+        command for command in runner.commands if command[:3] == ("git", "checkout", "-B")
+    )
+    assert checkout_command == (
+        "git",
+        "checkout",
+        "-B",
+        branch.branch,
+        f"origin/{branch.branch}",
+    )
+
+
 def test_run_uses_configured_review_fixer_and_final_reviewer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1298,7 +1567,7 @@ def test_prepare_implementation_clones_resumes_with_shared_install_helper(
 
     def validate_resume_clone(
         _context: RunContext,
-        agent_branch: ResumeAgentBranch,
+        agent_branch: ImplementationBranch,
     ) -> None:
         validated_branches.append(
             (
@@ -1503,6 +1772,185 @@ def test_run_gemini_comparison_promotes_local_file(
     assert "- [ ] Accept: (codex/claude)" in context.wiki.comparison_file.read_text(
         encoding="utf-8",
     )
+
+
+def test_run_comparison_judgment_restores_matching_wiki_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    context.wiki.directory.mkdir()
+    context.wiki.comparison_file.write_text("Wiki comparison\n", encoding="utf-8")
+    context.wiki.comparison_bundle_file.write_text("Wiki bundle\n", encoding="utf-8")
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.workflow_provider, "sync_wiki", lambda _wiki_dir: None)
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_agent",
+        lambda **_kwargs: pytest.fail("comparison judge should not run"),
+    )
+
+    updated_context = orchestrator._run_comparison_judgment(context)  # noqa: SLF001
+
+    assert updated_context == context
+    assert context.comparison_file.read_text(encoding="utf-8") == "Wiki comparison\n"
+    assert context.comparison_bundle_file.read_text(encoding="utf-8") == "Wiki bundle\n"
+
+
+def test_run_comparison_judgment_ignores_stale_wiki_marker_and_fails_without_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_commit_pair_context(tmp_path)
+    context.wiki.directory.mkdir()
+    context.wiki.comparison_file.write_text("Stale comparison\n", encoding="utf-8")
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    monkeypatch.setattr(orchestrator.workflow_provider, "sync_wiki", lambda _wiki_dir: None)
+    monkeypatch.setattr(orchestrator, "_prepare_comparison_bundle", lambda active_context: active_context)
+    monkeypatch.setattr(
+        orchestrator,
+        "_run_agent",
+        lambda **_kwargs: CommandResult(
+            command=("gemini",),
+            cwd=tmp_path,
+            returncode=0,
+            log_path=tmp_path / "gemini-comparison.log",
+            output="",
+        ),
+    )
+
+    with pytest.raises(DiamondDevError, match="did not write comparison.md"):
+        orchestrator._run_comparison_judgment(context)  # noqa: SLF001
+
+
+def test_run_comparison_judgment_deletes_stale_local_and_promotes_agent_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_commit_pair_context(tmp_path)
+    context.wiki.directory.mkdir()
+    context.comparison_file.write_text("Stale local comparison\n", encoding="utf-8")
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=_RecordingRunner())
+    commit_paths: list[tuple[str, ...]] = []
+
+    def run_agent(**kwargs: object) -> CommandResult:
+        active_context = kwargs["context"]
+        assert isinstance(active_context, RunContext)
+        assert active_context.commit_pair is not None
+        active_context.comparison_file.write_text(
+            f"{active_context.commit_pair.marker}\nFresh comparison\n",
+            encoding="utf-8",
+        )
+        return CommandResult(
+            command=("gemini",),
+            cwd=tmp_path,
+            returncode=0,
+            log_path=tmp_path / "gemini-comparison.log",
+            output="",
+        )
+
+    def commit_if_changes(
+        _repo_dir: Path,
+        *,
+        message: str,
+        log_prefix: str,
+        paths: tuple[str, ...],
+    ) -> bool:
+        assert message
+        assert log_prefix == "wiki-comparison"
+        commit_paths.append(paths)
+        return True
+
+    monkeypatch.setattr(orchestrator.workflow_provider, "sync_wiki", lambda _wiki_dir: None)
+    monkeypatch.setattr(orchestrator.workflow_provider, "push_wiki", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "_prepare_comparison_bundle", lambda active_context: active_context)
+    monkeypatch.setattr(orchestrator, "_run_agent", run_agent)
+    monkeypatch.setattr(orchestrator.git, "commit_if_changes", commit_if_changes)
+
+    orchestrator._run_comparison_judgment(context)  # noqa: SLF001
+
+    wiki_comparison = context.wiki.comparison_file.read_text(encoding="utf-8")
+    assert "Fresh comparison" in wiki_comparison
+    assert "Stale local comparison" not in wiki_comparison
+    assert context.commit_pair is not None
+    assert context.commit_pair.index_line in (
+        context.wiki.directory / "diamond-dev-commit-comparisons.md"
+    ).read_text(encoding="utf-8")
+    assert commit_paths == [
+        (
+            context.wiki.comparison_file.name,
+            "diamond-dev-commit-comparisons.md",
+        ),
+    ]
+
+
+def test_run_comparison_fixer_skips_when_wiki_review_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    context.wiki.directory.mkdir()
+    context.wiki.review_file.write_text("Review exists\n", encoding="utf-8")
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=context.implementation.codex_dir,
+        branch=context.implementation.codex_branch,
+    )
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    monkeypatch.setattr(orchestrator.workflow_provider, "sync_wiki", lambda _wiki_dir: None)
+
+    updated_context = orchestrator._run_comparison_fixer(context, selected, [])  # noqa: SLF001
+
+    assert updated_context == context
+    assert runner.commands == []
+
+
+def test_run_comparison_fixer_records_warning_when_agent_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_context(tmp_path)
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    context.wiki.directory.mkdir()
+    context.wiki.comparison_file.write_text("Comparison\n", encoding="utf-8")
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=selected_repo,
+        branch=context.implementation.codex_branch,
+    )
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    phase_warnings: list[PhaseWarning] = []
+
+    def fail_agent(**_kwargs: object) -> CommandResult:
+        raise CommandFailureError(
+            command="claude comparison",
+            cwd=str(selected_repo),
+            returncode=1,
+            log_path=str(selected_repo / "claude-comparison-agent.log"),
+        )
+
+    monkeypatch.setattr(orchestrator.workflow_provider, "sync_wiki", lambda _wiki_dir: None)
+    monkeypatch.setattr(orchestrator.git, "commit_if_changes", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(orchestrator, "_run_agent", fail_agent)
+
+    updated_context = orchestrator._run_comparison_fixer(  # noqa: SLF001
+        context,
+        selected,
+        phase_warnings,
+    )
+
+    assert updated_context == context
+    assert len(phase_warnings) == 1
+    assert phase_warnings[0].phase == "comparison fixer implementation"
+    assert phase_warnings[0].status == "failed"
+    assert phase_warnings[0].log_name == "claude-comparison-agent"
+    assert not (selected_repo / context.plan.comparison_file_name).exists()
+    assert ("git", "push", "-u", "origin", context.implementation.codex_branch) in runner.commands
 
 
 def test_prepare_wiki_with_plan_fails_on_plan_drift(tmp_path: Path) -> None:
