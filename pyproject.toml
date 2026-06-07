@@ -1,6 +1,6 @@
 [project]
 name = "diamond-dev"
-version = "0.2.0"
+version = "0.3.0"
 description = "Coordinate multi-agent implementation workflows from markdown plans."
 readme = "README.md"
 license = "Apache-2.0"
