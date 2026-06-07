@@ -23,8 +23,8 @@ from diamond_dev.workflow import (
     CommitPairContext,
     CommitPairEntry,
     RunContext,
-    safe_child_path,
-    write_child_text,
+    safe_generated_child_path,
+    write_generated_child_text,
 )
 
 if TYPE_CHECKING:
@@ -271,7 +271,7 @@ def upsert_commit_pair_index(
     commit_pair: CommitPairContext,
 ) -> bool:
     """Upsert the ordered commit-pair slug in the wiki index."""
-    index_path = safe_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
+    index_path = safe_generated_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
     records = (
         _records_from_text(index_path.read_text(encoding="utf-8"))
         if index_path.is_file()
@@ -286,7 +286,7 @@ def upsert_commit_pair_index(
         ):
             return False
 
-    write_child_text(
+    write_generated_child_text(
         wiki_dir,
         COMMIT_PAIR_INDEX_FILE_NAME,
         _render_commit_pair_index(records, new_index_line=commit_pair.index_line),
@@ -814,7 +814,7 @@ def _slug_used_for_different_pair(
     left_sha: str,
     right_sha: str,
 ) -> bool:
-    comparison_path = safe_child_path(wiki_dir, f"{slug}-comparison.md")
+    comparison_path = safe_generated_child_path(wiki_dir, f"{slug}-comparison.md")
     if comparison_path.is_file():
         comparison_records = _records_from_text(
             comparison_path.read_text(encoding="utf-8"),
@@ -831,7 +831,7 @@ def _slug_used_for_different_pair(
 
 def _iter_commit_pair_records(wiki_dir: Path) -> tuple[CommitPairRecord, ...]:
     records: list[CommitPairRecord] = []
-    index_path = safe_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
+    index_path = safe_generated_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
     if index_path.is_file():
         records.extend(_records_from_text(index_path.read_text(encoding="utf-8")))
     if wiki_dir.is_dir():

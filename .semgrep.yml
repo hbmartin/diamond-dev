@@ -9,35 +9,39 @@ rules:
           ...
           $PATH.read_text(...)
 
-  - id: diamond-dev.safe-child-path-derived-name-sink
+  - id: diamond-dev.safe-generated-child-path-derived-name-sink
     languages:
       - python
-    message: Use a literal or validated child filename at filesystem sinks instead of deriving it from Path.name.
+    message: Use a literal or validated generated filename at generated filesystem sinks instead of deriving it from Path.name.
     severity: ERROR
     patterns:
       - pattern-either:
           - pattern: |
-              $TARGET = safe_child_path($DIR, $SOURCE.name)
+              $TARGET = safe_generated_child_path($DIR, $SOURCE.name)
               ...
               $TARGET.read_text(...)
           - pattern: |
-              $TARGET = safe_child_path($DIR, $SOURCE.name)
+              $TARGET = safe_generated_child_path($DIR, $SOURCE.name)
               ...
               $TARGET.write_text(...)
           - pattern: |
-              $TARGET = safe_child_path($DIR, $SOURCE.name)
+              $TARGET = safe_generated_child_path($DIR, $SOURCE.name)
               ...
               shutil.copy2($TARGET, ...)
 
   - id: diamond-dev.safe-child-path-raw-child-name-join
     languages:
       - python
-    message: Validate child_name before joining it with a parent directory in safe_child_path.
+    message: Validate the child path argument before joining it with a parent directory.
     severity: ERROR
     patterns:
-      - pattern-inside: |
-          def safe_child_path(...):
-              ...
       - pattern-either:
-          - pattern: $DIRECTORY / child_name
-          - pattern: $DIRECTORY.joinpath(child_name)
+          - pattern-inside: |
+              def safe_child_path($DIRECTORY, $CHILD_NAME):
+                  ...
+          - pattern-inside: |
+              def safe_generated_child_path($DIRECTORY, $CHILD_NAME):
+                  ...
+      - pattern-either:
+          - pattern: $DIRECTORY / $CHILD_NAME
+          - pattern: $DIRECTORY.joinpath($CHILD_NAME)

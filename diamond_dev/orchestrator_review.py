@@ -24,9 +24,9 @@ from diamond_dev.review_judgments import (
     upsert_structured_judgments_section,
 )
 from diamond_dev.workflow import (
-    copy_child_file,
-    safe_child_path,
-    write_child_text,
+    copy_generated_child_file,
+    safe_generated_child_path,
+    write_generated_child_text,
 )
 
 if TYPE_CHECKING:
@@ -63,7 +63,10 @@ class ReviewPhasesMixin:
         phase_warnings: list[PhaseWarning],
     ) -> None:
         self.workflow_provider.sync_wiki(context.wiki.directory)
-        review_file = safe_child_path(selected.repo_dir, context.plan.review_file_name)
+        review_file = safe_generated_child_path(
+            selected.repo_dir,
+            context.plan.review_file_name,
+        )
         if context.wiki.review_file.is_file():
             self._restore_or_validate_review_file(context, review_file)
             self._run_review_fixes(context, selected, phase_warnings)
@@ -198,7 +201,7 @@ class ReviewPhasesMixin:
                 )
             self._restore_or_validate_review_judgments(
                 context,
-                safe_child_path(
+                safe_generated_child_path(
                     review_file.parent,
                     context.plan.review_judgments_file_name,
                 ),
@@ -207,7 +210,7 @@ class ReviewPhasesMixin:
         shutil.copy2(context.wiki.review_file, review_file)
         self._restore_or_validate_review_judgments(
             context,
-            safe_child_path(
+            safe_generated_child_path(
                 review_file.parent,
                 context.plan.review_judgments_file_name,
             ),
@@ -216,9 +219,12 @@ class ReviewPhasesMixin:
     def _promote_review_file(self, context: RunContext, review_file: Path) -> None:
         if review_file.name != context.plan.review_file_name:
             raise DiamondDevError(f"Unexpected review file: {review_file}")
-        review_file = safe_child_path(review_file.parent, context.plan.review_file_name)
+        review_file = safe_generated_child_path(
+            review_file.parent,
+            context.plan.review_file_name,
+        )
         review_markdown = review_file.read_text(encoding="utf-8")
-        review_judgments_file = safe_child_path(
+        review_judgments_file = safe_generated_child_path(
             review_file.parent,
             context.plan.review_judgments_file_name,
         )
@@ -230,17 +236,17 @@ class ReviewPhasesMixin:
                 review_markdown,
                 judgment_status.judgments,
             )
-            write_child_text(
+            write_generated_child_text(
                 review_file.parent,
                 context.plan.review_file_name,
                 review_markdown,
             )
-            write_child_text(
+            write_generated_child_text(
                 review_file.parent,
                 context.plan.review_judgments_file_name,
                 canonical_review_judgments_json(judgment_status.judgments),
             )
-            copy_child_file(
+            copy_generated_child_file(
                 source_dir=review_file.parent,
                 source_name=context.plan.review_judgments_file_name,
                 destination_dir=context.wiki.directory,
@@ -268,7 +274,7 @@ class ReviewPhasesMixin:
                 label="review input needed",
             )
 
-        copy_child_file(
+        copy_generated_child_file(
             source_dir=review_file.parent,
             source_name=context.plan.review_file_name,
             destination_dir=context.wiki.directory,

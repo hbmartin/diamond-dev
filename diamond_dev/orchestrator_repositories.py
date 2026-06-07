@@ -12,6 +12,7 @@ from diamond_dev.commands import build_pnpm_install_command, build_uv_sync_comma
 from diamond_dev.commit_pair import commit_pair_entries_avoiding_base_branch
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.markdown import read_normalized_markdown
+from diamond_dev.workflow import safe_child_path
 
 if TYPE_CHECKING:
     from diamond_dev.executor import CommandRunnerLike
@@ -34,7 +35,7 @@ class RepositoryPreparationMixin:
 
     def _prepare_wiki_with_plan(self, context: RunContext) -> None:
         self._ensure_wiki_repo(context)
-        wiki_plan = context.wiki.directory / context.plan.file_name
+        wiki_plan = safe_child_path(context.wiki.directory, context.plan.file_name)
         source_plan_markdown = read_normalized_markdown(context.plan.path)
         if wiki_plan.is_file():
             wiki_plan_markdown = read_normalized_markdown(wiki_plan)
@@ -161,7 +162,10 @@ class RepositoryPreparationMixin:
         self._install_implementation_packages(implementation)
 
         for branch in implementation.branches:
-            shutil.copy2(context.plan.path, branch.repo_dir / context.plan.file_name)
+            shutil.copy2(
+                context.plan.path,
+                safe_child_path(branch.repo_dir, context.plan.file_name),
+            )
         return context
 
     def _clone_commit_pair_repositories(self, context: RunContext) -> RunContext:
