@@ -219,6 +219,7 @@ def _check_write_permission(*, label: str, path: Path) -> WritePermissionCheck:
         raise DiamondDevError(f"Doctor write check target is not a directory: {path}")
 
     temp_file_path: Path | None = None
+    write_succeeded = False
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -231,17 +232,21 @@ def _check_write_permission(*, label: str, path: Path) -> WritePermissionCheck:
             temp_file_path = Path(temp_file.name)
             temp_file.write("ok\n")
             temp_file.flush()
+        write_succeeded = True
     except (OSError,) as error:
         raise DiamondDevError(
             f"Doctor cannot write to {label} directory {path}: {error}",
         ) from error
     finally:
         if temp_file_path is not None:
-            _clean_up_write_check_file(
-                label=label,
-                path=path,
-                temp_file_path=temp_file_path,
-            )
+            if write_succeeded:
+                _clean_up_write_check_file(
+                    label=label,
+                    path=path,
+                    temp_file_path=temp_file_path,
+                )
+            else:
+                _clean_up_failed_write_check_file(temp_file_path=temp_file_path)
     return WritePermissionCheck(label=label, path=path)
 
 
@@ -252,11 +257,22 @@ def _clean_up_write_check_file(
     temp_file_path: Path,
 ) -> None:
     try:
-        temp_file_path.unlink()
+        temp_file_path.unlink(missing_ok=True)
     except (OSError,) as error:
         raise DiamondDevError(
             f"Doctor cannot clean up write check in {label} directory {path}: {error}",
         ) from error
+
+
+def _clean_up_failed_write_check_file(*, temp_file_path: Path) -> None:
+    try:
+        temp_file_path.unlink(missing_ok=True)
+    except (OSError,) as error:
+        logger.warning(
+            "Failed to clean up temporary write check file {} after write failure: {}",
+            temp_file_path,
+            error,
+        )
 
 
 def _check_agent_auth(
