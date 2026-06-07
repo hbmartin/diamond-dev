@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 
 
 LOCAL_COMPARISON_FILE_NAME: Final = "comparison.md"
+_SAFE_CHILD_NAME_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,12 +67,11 @@ class PlanContext:
 
 def safe_child_path(directory: Path, child_name: str) -> Path:
     """Return a resolved child path that cannot escape its parent directory."""
-    child_path = Path(child_name)
-    if not child_name or child_path.is_absolute() or child_path.name != child_name:
-        raise DiamondDevError(f"Unsafe child path: {child_name!r}")
-
+    valid_child_name = _validated_child_name(child_name)
     resolved_directory = directory.resolve(strict=False)
-    resolved_child = (resolved_directory / child_path).resolve(strict=False)
+    resolved_child = resolved_directory.joinpath(valid_child_name).resolve(  # NOSONAR
+        strict=False,
+    )
     try:
         resolved_child.relative_to(resolved_directory)
     except (ValueError,) as error:
@@ -78,6 +79,16 @@ def safe_child_path(directory: Path, child_name: str) -> Path:
             f"Child path escapes parent directory: {child_name!r}",
         ) from error
     return resolved_child
+
+
+def _validated_child_name(child_name: str) -> str:
+    """Return a direct generated child name safe for filesystem joins."""
+    child_path = Path(child_name)
+    if not child_name or child_path.is_absolute() or child_path.name != child_name:
+        raise DiamondDevError(f"Unsafe child path: {child_name!r}")
+    if _SAFE_CHILD_NAME_PATTERN.fullmatch(child_name) is None:
+        raise DiamondDevError(f"Unsafe child path: {child_name!r}")
+    return child_name
 
 
 def read_child_text(directory: Path, child_name: str) -> str:

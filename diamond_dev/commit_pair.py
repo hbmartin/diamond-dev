@@ -23,7 +23,6 @@ from diamond_dev.workflow import (
     CommitPairContext,
     CommitPairEntry,
     RunContext,
-    read_child_text,
     safe_child_path,
     write_child_text,
 )
@@ -274,7 +273,7 @@ def upsert_commit_pair_index(
     """Upsert the ordered commit-pair slug in the wiki index."""
     index_path = safe_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
     records = (
-        _records_from_text(read_child_text(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME))
+        _records_from_text(index_path.read_text(encoding="utf-8"))
         if index_path.is_file()
         else ()
     )
