@@ -7,12 +7,17 @@
 [![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hbmartin/diamond-dev)
 
-`diamond-dev` orchestrates a configurable multi-agent implementation workflow
-from a single markdown plan. By default it asks two coding agents (Codex and
-Claude) to implement the same plan on separate branches, asks a third agent
-(Gemini) to compare the results, waits for you to accept one branch in the
-repository wiki, refines the selected branch, runs a CodeRabbit review, applies
-the accepted fixes, and opens a GitHub PR.
+**Run one plan through competing coding agents, pick the winner, ship a PR.**
+
+`diamond-dev` takes a single markdown plan and hands it to two coding agents at
+once (by default Codex and Claude), each working on its own branch. A judge agent
+(Gemini) compares the results, you accept one branch with a single checkbox, and
+`diamond-dev` then refines it, runs a CodeRabbit review, applies the accepted
+fixes, and opens a GitHub PR.
+
+The name traces the shape of the run: it **fans out** from one plan to many
+parallel implementations, then **converges** back in — through the judge's
+comparison and your acceptance — to a single PR. Out, then in: a diamond.
 
 ## Workflow
 
@@ -51,11 +56,16 @@ flowchart TD
 
 ## Table of Contents
 
+**Getting started**
+
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quickstart](#quickstart)
 - [Usage](#usage)
 - [Configuration](#configuration)
+
+**Reference**
+
 - [Prompts](#prompts)
 - [Generated Repositories](#generated-repositories)
 - [Auto-Resume](#auto-resume)
@@ -63,6 +73,7 @@ flowchart TD
 - [Security](#security)
 - [Logging](#logging)
 - [Troubleshooting & FAQ](#troubleshooting--faq)
+
 - [License](#license)
 
 ## Prerequisites
@@ -202,26 +213,41 @@ long-running agents start.
 
 ## Configuration
 
-`.diamond-dev.toml` requires a target repository URL:
+`diamond-dev` reads `.diamond-dev.toml` from the invocation directory (or the
+path passed to `--config`). Only one key is required; everything else has a
+default, so most projects need just a few lines.
+
+### Minimal configuration
+
+The smallest working config is a single line — the target repository:
 
 ```toml
 repository_url = "git@github.com:owner/repo.git"
 ```
 
-`repository_url` must be a Git remote URL in a supported URL form such as
+`repository_url` must be a Git remote URL in a supported form such as
 `https://github.com/owner/repo`, `ssh://git@github.com/owner/repo.git`,
 `git://host/owner/repo.git`, `file:///path/to/repo.git`, or an SCP-like form
-such as `git@github.com:owner/repo.git`.
+such as `git@github.com:owner/repo.git`. With only this key, `diamond-dev` uses
+the default implementers, judge, prompts, and comparison settings described
+below.
 
-Optional top-level keys:
+### Full configuration
 
-- `wiki_repository_url`: GitHub Gollum wiki repository URL. If omitted, GitHub
-  remotes are derived as `<repo>.wiki.git`. The local wiki clone directory is
-  named from the effective wiki repository URL.
+The complete set of tables and keys is shown below. Everything outside
+`repository_url` is optional — add only the tables you want to change. The
+`[workflow]`, `[comparison]`, and `[acceptance]` values shown are the built-in
+defaults; the `[notifications]`, `[prompts]`, and `[agents]` entries are
+illustrative examples.
 
-Optional tables:
+`wiki_repository_url` (optional, top-level): GitHub Gollum wiki repository URL.
+If omitted, GitHub remotes are derived as `<repo>.wiki.git`. The local wiki clone
+directory is named from the effective wiki repository URL.
 
 ```toml
+repository_url = "git@github.com:owner/repo.git"
+# wiki_repository_url = "git@github.com:owner/repo.wiki.git"
+
 [notifications]
 initial_implementation_url = "https://example.test/initial"
 comparison_url = "https://example.test/comparison"
@@ -314,6 +340,13 @@ The previous `notes_repository_url` key has been removed. Use
 `wiki_repository_url`; configs that still contain the old key fail at startup.
 
 </details>
+
+## Reference
+
+Detailed behavior for when you need it — prompt internals, generated
+repositories, resume semantics, acceptance and review artifacts, security, and
+logging. The Getting Started sections above cover the common path; reach for
+these when something surprises you.
 
 ## Prompts
 
