@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from http.client import HTTPException
-from typing import NoReturn
+from typing import NoReturn, Self
 from urllib.error import URLError
 
 from diamond_dev import notify
@@ -74,7 +74,7 @@ def test_notify_url_logs_successful_response(monkeypatch) -> None:
     class Response:
         status = 204
 
-        def __enter__(self) -> Response:
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(

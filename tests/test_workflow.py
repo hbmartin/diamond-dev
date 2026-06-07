@@ -45,6 +45,17 @@ def test_safe_child_path_rejects_absolute_names(tmp_path: Path) -> None:
         safe_child_path(tmp_path, str(tmp_path / "artifact.md"))
 
 
+def test_safe_child_path_rejects_symlink_escape(tmp_path: Path) -> None:
+    parent_dir = tmp_path / "parent"
+    outside_dir = tmp_path / "outside"
+    parent_dir.mkdir()
+    outside_dir.mkdir()
+    (parent_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
+
+    with pytest.raises(DiamondDevError, match="escapes parent directory"):
+        safe_child_path(parent_dir, "escape")
+
+
 def test_build_run_context_uses_effective_wiki_url_for_directory(
     tmp_path: Path,
 ) -> None:

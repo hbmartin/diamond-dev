@@ -105,14 +105,15 @@ def test_acceptance_wait_delays_cap_final_interval() -> None:
 
 
 @pytest.mark.parametrize(
-    "kwargs",
+    ("kwargs", "expected_message"),
     [
-        {"poll_interval_seconds": 0},
-        {"max_wait_seconds": 0},
+        ({"poll_interval_seconds": 0}, "poll_interval_seconds must be positive"),
+        ({"max_wait_seconds": 0}, "max_wait_seconds must be positive"),
     ],
 )
 def test_acceptance_wait_delays_rejects_non_positive_values(
     kwargs: dict[str, int],
+    expected_message: str,
 ) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=expected_message):
         acceptance_wait_delays(**kwargs)

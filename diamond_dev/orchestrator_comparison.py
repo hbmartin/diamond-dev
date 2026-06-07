@@ -172,8 +172,7 @@ class ComparisonPhasesMixin:
         return active_context
 
     def _promote_local_comparison(self, context: RunContext) -> None:
-        # Re-sanitize at the filesystem sink so path safety stays local.
-        comparison_file = safe_child_path(context.cwd, context.comparison_file.name)
+        comparison_file = safe_child_path(context.cwd, "comparison.md")
         comparison_markdown = comparison_file.read_text(encoding="utf-8")
         comparison_markdown = ensure_commit_pair_marker(comparison_markdown, context)
         comparison_file.write_text(

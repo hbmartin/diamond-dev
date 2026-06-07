@@ -14,7 +14,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_METRICS = ",".join(
     [
         "alert_status",
@@ -35,7 +34,7 @@ DEFAULT_METRICS = ",".join(
         "new_security_hotspots_reviewed",
         "new_duplicated_lines_density",
         "new_lines",
-    ]
+    ],
 )
 SEVERITY_RANK = {
     "BLOCKER": 0,
@@ -48,7 +47,7 @@ SEVERITY_RANK = {
 
 def load_env(path: Path) -> dict[str, str]:
     env: dict[str, str] = {}
-    if path.exists():
+    if path.is_file():
         for raw_line in path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -92,7 +91,7 @@ class SonarClient:
             raise SystemExit(f"Sonar API error {error.code} for {path}: {body}") from error
         except urllib.error.URLError as error:
             raise SystemExit(
-                f"Sonar API connection error for {path}: {error.reason}"
+                f"Sonar API connection error for {path}: {error.reason}",
             ) from error
 
 
@@ -221,16 +220,21 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
         or issue.get("severity") in {"BLOCKER", "CRITICAL"}
     ]
     hotspots = fetch_hotspots(client, project, branch)
+    project_component = project_info.get("component") or {}
+    branch_rows = branches.get("branches") or []
+    quality_gate_status = quality_gate.get("projectStatus") or {}
+    analysis_rows = analyses.get("analyses") or []
+    measure_rows = (measures.get("component") or {}).get("measures") or []
 
     return {
-        "project": project_info.get("component", {}),
+        "project": project_component,
         "branch": branch,
-        "branches": branches.get("branches", []),
-        "quality_gate": quality_gate.get("projectStatus", {}),
-        "analyses": analyses.get("analyses", []),
+        "branches": branch_rows,
+        "quality_gate": quality_gate_status,
+        "analyses": analysis_rows,
         "measures": {
             measure["metric"]: measure_value(measure)
-            for measure in measures.get("component", {}).get("measures", [])
+            for measure in measure_rows
         },
         "issues": {
             "total": len(issues),
@@ -317,7 +321,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(
                 f"- `{issue.get('severity')}` `{issue.get('type')}` `{issue.get('rule')}` "
                 f"`{location}` - {issue.get('message')} "
-                f"(impact: {impact.get('softwareQuality', 'n/a')}/{impact.get('severity', 'n/a')}, key: `{issue.get('key')}`)"
+                f"(impact: {impact.get('softwareQuality', 'n/a')}/{impact.get('severity', 'n/a')}, key: `{issue.get('key')}`)",
             )
     else:
         lines.append("- None in selected issue set.")
@@ -347,7 +351,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         location = f"{path}:{line}" if line else path
         lines.append(
             f"- `{hotspot.get('status')}` `{hotspot.get('vulnerabilityProbability')}` "
-            f"`{location}` - {hotspot.get('message')} (key: `{hotspot.get('key')}`)"
+            f"`{location}` - {hotspot.get('message')} (key: `{hotspot.get('key')}`)",
         )
     lines.append("")
 
