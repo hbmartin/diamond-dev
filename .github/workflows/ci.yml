@@ -35,6 +35,9 @@ jobs:
       - name: Run Ruff
         run: uv run ruff check diamond_dev
 
+      - name: Run Semgrep
+        run: uvx semgrep==1.165.0 --config .semgrep.yml --error
+
       - name: Run Pylint
         id: pylint
         continue-on-error: true

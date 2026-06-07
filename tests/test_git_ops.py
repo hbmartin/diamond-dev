@@ -7,9 +7,17 @@ from pathlib import Path
 
 import pytest
 
+from diamond_dev.config import DiamondDevConfig
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.executor import CommandResult, CommandRunner
 from diamond_dev.git_ops import GitOperations
+from diamond_dev.workflow import (
+    ImplementationBranch,
+    ImplementationContext,
+    PlanContext,
+    RunContext,
+    WikiContext,
+)
 
 
 def test_remote_default_branch_rejects_empty_symbolic_ref_output(
@@ -343,7 +351,7 @@ def test_push_agent_branch_records_dirty_files_and_pushes(tmp_path: Path) -> Non
         ],
     )
     git = GitOperations(runner)
-    context = _DirtyContext()
+    context = _run_context(tmp_path)
 
     updated_context = git.push_agent_branch(
         context,
@@ -422,9 +430,35 @@ class _ScriptedRunner:
         )
 
 
-class _DirtyContext:
-    def __init__(self, dirty_records: tuple[object, ...] = ()) -> None:
-        self.dirty_records = dirty_records
-
-    def with_dirty_record(self, dirty_record: object) -> _DirtyContext:
-        return _DirtyContext((*self.dirty_records, dirty_record))
+def _run_context(tmp_path: Path) -> RunContext:
+    wiki_dir = tmp_path / "repo.wiki"
+    return RunContext(
+        cwd=tmp_path,
+        config=DiamondDevConfig(
+            config_path=tmp_path / ".diamond-dev.toml",
+            repository_url="git@github.com:owner/repo.git",
+        ),
+        plan=PlanContext(
+            path=tmp_path / "My Plan.md",
+            slug="my-plan",
+        ),
+        wiki=WikiContext(
+            url="git@github.com:owner/repo.wiki.git",
+            directory=wiki_dir,
+            comparison_file=wiki_dir / "my-plan-comparison.md",
+            comparison_bundle_file=wiki_dir / "my-plan-comparison-bundle.md",
+            review_file=wiki_dir / "my-plan-review.md",
+            review_judgments_file=wiki_dir / "my-plan-review-judgments.json",
+        ),
+        implementation=ImplementationContext(
+            branches=(
+                ImplementationBranch(
+                    agent_name="codex",
+                    repo_dir=tmp_path,
+                    branch="codex/my-plan",
+                    log_prefix="codex",
+                ),
+            ),
+            base_branch="main",
+        ),
+    )

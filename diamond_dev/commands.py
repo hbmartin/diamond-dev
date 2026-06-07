@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from diamond_dev.workflow import LOCAL_COMPARISON_FILE_NAME
+
 _DO_NOT_PUSH_INSTRUCTION: Final = (
     "- Do not push; diamond-dev will push committed work."
 )
@@ -282,7 +284,8 @@ def _comparison_required_lines(
         f"- Comparison bundle: `{context.comparison_bundle_file_name}`",
         "- Read the comparison bundle before judging branch quality.",
         *branch_lines,
-        "- Write the final comparison to `comparison.md` in the current directory.",
+        "- Write the final comparison to "
+        f"`{LOCAL_COMPARISON_FILE_NAME}` in the current directory.",
         "- Do not modify any implementation repository.",
     )
 

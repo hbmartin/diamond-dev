@@ -36,7 +36,7 @@ DEFAULT_METRICS = ",".join(
         "new_lines",
     ],
 )
-SEVERITY_RANK = {
+SEVERITY_RANK: dict[str, int] = {
     "BLOCKER": 0,
     "CRITICAL": 1,
     "MAJOR": 2,
@@ -107,7 +107,9 @@ def first_impact(issue: dict[str, Any]) -> dict[str, str]:
 
 def severity_rank(issue: dict[str, Any]) -> int:
     severity = issue.get("severity")
-    return SEVERITY_RANK.get(severity, 99) if isinstance(severity, str) else 99
+    if not isinstance(severity, str):
+        return 99
+    return SEVERITY_RANK.get(severity.upper(), 99)
 
 
 def fetch_issues(

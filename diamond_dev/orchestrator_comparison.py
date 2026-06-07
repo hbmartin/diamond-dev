@@ -24,7 +24,7 @@ from diamond_dev.config import read_comparison_judgment_prompt, read_prompt_file
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.notify import notify_url
 from diamond_dev.report import PhaseWarning
-from diamond_dev.workflow import safe_child_path
+from diamond_dev.workflow import LOCAL_COMPARISON_FILE_NAME, safe_child_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -135,7 +135,8 @@ class ComparisonPhasesMixin:
         )
         if not active_context.comparison_file.is_file():
             raise DiamondDevError(
-                f"Comparison judge {comparison_judge} did not write comparison.md",
+                f"Comparison judge {comparison_judge} did not write "
+                f"{LOCAL_COMPARISON_FILE_NAME}",
             )
 
         self._promote_local_comparison(active_context)
@@ -172,7 +173,7 @@ class ComparisonPhasesMixin:
         return active_context
 
     def _promote_local_comparison(self, context: RunContext) -> None:
-        comparison_file = safe_child_path(context.cwd, "comparison.md")
+        comparison_file = safe_child_path(context.cwd, LOCAL_COMPARISON_FILE_NAME)
         comparison_markdown = comparison_file.read_text(encoding="utf-8")
         comparison_markdown = ensure_commit_pair_marker(comparison_markdown, context)
         comparison_file.write_text(
@@ -184,10 +185,7 @@ class ComparisonPhasesMixin:
         )
         shutil.copy2(comparison_file, context.wiki.comparison_file)
         paths = [context.wiki.comparison_file.name]
-        comparison_bundle_file = safe_child_path(
-            context.cwd,
-            context.comparison_bundle_file.name,
-        )
+        comparison_bundle_file = context.comparison_bundle_file
         if comparison_bundle_file.is_file():
             shutil.copy2(
                 comparison_bundle_file,

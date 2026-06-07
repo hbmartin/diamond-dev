@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.naming import (
@@ -15,6 +15,9 @@ from diamond_dev.naming import (
 
 if TYPE_CHECKING:
     from diamond_dev.config import DiamondDevConfig
+
+
+LOCAL_COMPARISON_FILE_NAME: Final = "comparison.md"
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,7 +241,7 @@ class RunContext:
     @property
     def comparison_file(self) -> Path:
         """Return the local comparison artifact path."""
-        return safe_child_path(self.cwd, "comparison.md")
+        return safe_child_path(self.cwd, LOCAL_COMPARISON_FILE_NAME)
 
     @property
     def comparison_bundle_file(self) -> Path:
