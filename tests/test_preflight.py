@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Self
 
 import pytest
 
@@ -135,3 +136,83 @@ def test_run_preflight_runs_doctor_checks(
         "workspace",
         "logs",
     }
+
+
+def test_check_write_permission_reports_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    temp_file_path = tmp_path / ".diamond-dev-doctor-failing.tmp"
+
+    class _FailingTemporaryFile:
+        name = str(temp_file_path)
+
+        def __enter__(self) -> Self:
+            temp_file_path.touch()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> bool:
+            return False
+
+        def write(self, text: str) -> int:
+            assert text == "ok\n"
+            raise OSError("disk full")
+
+        def flush(self) -> None:
+            pytest.fail("flush should not run after a failed write")
+
+    def named_temporary_file(**kwargs: object) -> _FailingTemporaryFile:
+        assert kwargs == {
+            "mode": "w",
+            "encoding": "utf-8",
+            "dir": tmp_path,
+            "prefix": ".diamond-dev-doctor-",
+            "suffix": ".tmp",
+            "delete": False,
+        }
+        return _FailingTemporaryFile()
+
+    monkeypatch.setattr(preflight.tempfile, "NamedTemporaryFile", named_temporary_file)
+
+    with pytest.raises(DiamondDevError, match=r"Doctor cannot write .*disk full"):
+        preflight._check_write_permission(  # noqa: SLF001
+            label="workspace",
+            path=tmp_path,
+        )
+
+    assert not temp_file_path.exists()
+
+
+def test_check_write_permission_reports_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_unlink = Path.unlink
+    attempted_paths: list[Path] = []
+
+    def unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path.parent == tmp_path and path.name.startswith(".diamond-dev-doctor-"):
+            attempted_paths.append(path)
+            raise OSError("permission denied")
+        real_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    with pytest.raises(
+        DiamondDevError,
+        match=r"Doctor cannot clean up write check .*permission denied",
+    ):
+        preflight._check_write_permission(  # noqa: SLF001
+            label="workspace",
+            path=tmp_path,
+        )
+
+    assert attempted_paths
+    for attempted_path in attempted_paths:
+        if attempted_path.exists():
+            real_unlink(attempted_path)

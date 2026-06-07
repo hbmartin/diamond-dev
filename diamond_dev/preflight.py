@@ -218,6 +218,7 @@ def _check_write_permission(*, label: str, path: Path) -> WritePermissionCheck:
     if not path.is_dir():
         raise DiamondDevError(f"Doctor write check target is not a directory: {path}")
 
+    temp_file_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -225,15 +226,37 @@ def _check_write_permission(*, label: str, path: Path) -> WritePermissionCheck:
             dir=path,
             prefix=".diamond-dev-doctor-",
             suffix=".tmp",
-            delete=True,
+            delete=False,
         ) as temp_file:
+            temp_file_path = Path(temp_file.name)
             temp_file.write("ok\n")
             temp_file.flush()
     except (OSError,) as error:
         raise DiamondDevError(
             f"Doctor cannot write to {label} directory {path}: {error}",
         ) from error
+    finally:
+        if temp_file_path is not None:
+            _clean_up_write_check_file(
+                label=label,
+                path=path,
+                temp_file_path=temp_file_path,
+            )
     return WritePermissionCheck(label=label, path=path)
+
+
+def _clean_up_write_check_file(
+    *,
+    label: str,
+    path: Path,
+    temp_file_path: Path,
+) -> None:
+    try:
+        temp_file_path.unlink()
+    except (OSError,) as error:
+        raise DiamondDevError(
+            f"Doctor cannot clean up write check in {label} directory {path}: {error}",
+        ) from error
 
 
 def _check_agent_auth(
