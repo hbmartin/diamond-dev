@@ -13,6 +13,7 @@ _SAFE_GENERATED_CHILD_NAME_PATTERN: Final = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9._ -]*[A-Za-z0-9_-])?",
 )
 _ASCII_CONTROL_CHARACTER_LIMIT: Final = 32
+_ASCII_DELETE_CONTROL_CHARACTER: Final = 127
 _UNSAFE_DIRECT_CHILD_NAMES: Final[frozenset[str]] = frozenset((".", ".."))
 _WINDOWS_RESERVED_CHILD_NAME_CHARACTERS: Final[frozenset[str]] = frozenset(
     '<>:"|?*',
@@ -116,11 +117,19 @@ def _is_unsafe_direct_child_name(child_name: str) -> bool:
         or child_name.startswith("-")
         or child_name.endswith((" ", "."))
         or any(
-            ord(character) < _ASCII_CONTROL_CHARACTER_LIMIT
+            _is_ascii_control_character(character)
             or character in _WINDOWS_RESERVED_CHILD_NAME_CHARACTERS
             for character in child_name
         )
         or _is_windows_reserved_device_name(child_name)
+    )
+
+
+def _is_ascii_control_character(character: str) -> bool:
+    character_codepoint = ord(character)
+    return (
+        character_codepoint < _ASCII_CONTROL_CHARACTER_LIMIT
+        or character_codepoint == _ASCII_DELETE_CONTROL_CHARACTER
     )
 
 

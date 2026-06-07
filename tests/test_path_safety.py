@@ -47,6 +47,7 @@ def test_safe_child_path_allows_direct_user_filenames(
         "nested\\artifact.md",
         "-draft.md",
         "artifact\x00.md",
+        "artifact\x7f.md",
         "artifact\n.md",
         "artifact?.md",
         "artifact*.md",
