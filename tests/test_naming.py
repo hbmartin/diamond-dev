@@ -72,7 +72,7 @@ def test_is_git_remote_url_accepts_git_url_formats(repository_url: str) -> None:
         "https://github.com/owner/repo name",
         "git@github.com",
         "git@github.com:owner",
-        "ftp://github.com/owner/repo.git",
+        "gopher://github.com/owner/repo.git",
         "file://",
         "file://localhost",
     ],

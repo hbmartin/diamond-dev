@@ -329,19 +329,23 @@ def _agent_auth_command(
 ) -> tuple[str, ...]:
     match adapter_name:
         case "codex":
-            return ("codex", "login", "status")
+            command = ("codex", "login", "status")
         case "claude":
-            return ("claude", "auth", "status", "--text")
+            command = ("claude", "auth", "status", "--text")
         case "gemini":
-            command = ["gemini"]
-            if model is not None:
-                command.extend(("-m", model))
-            command.extend(("-p", _DOCTOR_GEMINI_PROMPT, "--skip-trust"))
-            return tuple(command)
+            model_args = () if model is None else ("-m", model)
+            command = (
+                "gemini",
+                *model_args,
+                "-p",
+                _DOCTOR_GEMINI_PROMPT,
+                "--skip-trust",
+            )
         case "coderabbit":
-            return ("coderabbit", "auth", "status", "--agent")
+            command = ("coderabbit", "auth", "status", "--agent")
         case _:
             raise DiamondDevError(f"Unknown agent adapter: {adapter_name}")
+    return command
 
 
 def _check_wiki_access(

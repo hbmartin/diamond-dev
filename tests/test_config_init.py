@@ -168,7 +168,7 @@ def test_run_config_init_reprompts_invalid_notification_url(tmp_path: Path) -> N
         read_line=_answers(
             "git@github.com:owner/repo.git\n",
             "\n",
-            "ftp://example.test/hook\n",
+            "mailto:user@example.test\n",
             "https://example.test/hook\n",
             "\n",
             "\n",
@@ -194,7 +194,7 @@ def test_run_config_init_reprompts_malformed_notification_url(
         read_line=_answers(
             "git@github.com:owner/repo.git\n",
             "\n",
-            "http://[example.com]\n",
+            "https://[example.com]\n",
             "https://example.test/hook\n",
             "\n",
             "\n",

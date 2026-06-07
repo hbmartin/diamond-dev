@@ -351,9 +351,9 @@ def test_push_agent_branch_records_dirty_files_and_pushes(tmp_path: Path) -> Non
         ],
     )
     git = GitOperations(runner)
-    context = _run_context(tmp_path)
+    context: RunContext = _run_context(tmp_path)
 
-    updated_context = git.push_agent_branch(
+    updated_context: RunContext = git.push_agent_branch(
         context,
         label="codex initial",
         repo_dir=tmp_path,

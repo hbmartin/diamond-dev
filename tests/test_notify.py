@@ -65,7 +65,7 @@ def test_notify_url_skips_unsupported_scheme(monkeypatch) -> None:
 
     monkeypatch.setattr(notify, "urlopen", unexpected_urlopen)
 
-    notify.notify_url("ftp://example.test/hook", label="hook")
+    notify.notify_url("mailto:user@example.test", label="hook")
 
 
 def test_notify_url_logs_successful_response(monkeypatch) -> None:

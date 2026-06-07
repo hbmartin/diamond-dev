@@ -24,7 +24,13 @@ from diamond_dev.config import read_comparison_judgment_prompt, read_prompt_file
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.notify import notify_url
 from diamond_dev.report import PhaseWarning
-from diamond_dev.workflow import LOCAL_COMPARISON_FILE_NAME, safe_child_path
+from diamond_dev.workflow import (
+    LOCAL_COMPARISON_FILE_NAME,
+    copy_child_file,
+    read_child_text,
+    safe_child_path,
+    write_child_text,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -173,23 +179,33 @@ class ComparisonPhasesMixin:
         return active_context
 
     def _promote_local_comparison(self, context: RunContext) -> None:
-        comparison_file = safe_child_path(context.cwd, LOCAL_COMPARISON_FILE_NAME)
-        comparison_markdown = comparison_file.read_text(encoding="utf-8")
+        comparison_markdown = read_child_text(
+            context.cwd,
+            LOCAL_COMPARISON_FILE_NAME,
+        )
         comparison_markdown = ensure_commit_pair_marker(comparison_markdown, context)
-        comparison_file.write_text(
+        write_child_text(
+            context.cwd,
+            LOCAL_COMPARISON_FILE_NAME,
             ensure_acceptance_checkbox(
                 comparison_markdown,
                 context.implementation.implementer_names,
             ),
-            encoding="utf-8",
         )
-        shutil.copy2(comparison_file, context.wiki.comparison_file)
+        copy_child_file(
+            source_dir=context.cwd,
+            source_name=LOCAL_COMPARISON_FILE_NAME,
+            destination_dir=context.wiki.directory,
+            destination_name=context.wiki.comparison_file.name,
+        )
         paths = [context.wiki.comparison_file.name]
         comparison_bundle_file = context.comparison_bundle_file
         if comparison_bundle_file.is_file():
-            shutil.copy2(
-                comparison_bundle_file,
-                context.wiki.comparison_bundle_file,
+            copy_child_file(
+                source_dir=context.cwd,
+                source_name=context.plan.comparison_bundle_file_name,
+                destination_dir=context.wiki.directory,
+                destination_name=context.wiki.comparison_bundle_file.name,
             )
             paths.append(context.wiki.comparison_bundle_file.name)
         if context.commit_pair is not None and upsert_commit_pair_index(

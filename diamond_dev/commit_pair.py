@@ -23,7 +23,9 @@ from diamond_dev.workflow import (
     CommitPairContext,
     CommitPairEntry,
     RunContext,
+    read_child_text,
     safe_child_path,
+    write_child_text,
 )
 
 if TYPE_CHECKING:
@@ -271,11 +273,13 @@ def upsert_commit_pair_index(
 ) -> bool:
     """Upsert the ordered commit-pair slug in the wiki index."""
     index_path = safe_child_path(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME)
-    existing_text = (
-        index_path.read_text(encoding="utf-8") if index_path.is_file() else ""
+    records = (
+        _records_from_text(read_child_text(wiki_dir, COMMIT_PAIR_INDEX_FILE_NAME))
+        if index_path.is_file()
+        else ()
     )
     left_sha, right_sha = commit_pair.shas
-    for record in _records_from_text(existing_text):
+    for record in records:
         if (
             record.left_sha == left_sha
             and record.right_sha == right_sha
@@ -283,15 +287,30 @@ def upsert_commit_pair_index(
         ):
             return False
 
-    if existing_text.strip():
-        updated_text = f"{existing_text.rstrip()}\n{commit_pair.index_line}\n"
-    else:
-        updated_text = (
-            "# Diamond Dev commit comparisons\n\n"
-            f"{commit_pair.index_line}\n"
-        )
-    index_path.write_text(updated_text, encoding="utf-8")
+    write_child_text(
+        wiki_dir,
+        COMMIT_PAIR_INDEX_FILE_NAME,
+        _render_commit_pair_index(records, new_index_line=commit_pair.index_line),
+    )
     return True
+
+
+def _render_commit_pair_index(
+    records: Sequence[CommitPairRecord],
+    *,
+    new_index_line: str,
+) -> str:
+    lines = [
+        "# Diamond Dev commit comparisons",
+        "",
+        *(_commit_pair_record_line(record) for record in records),
+        new_index_line,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _commit_pair_record_line(record: CommitPairRecord) -> str:
+    return f"- `{record.left_sha}` vs `{record.right_sha}` -> `{record.slug}`"
 
 
 def _resolve_one_input(  # noqa: PLR0913
