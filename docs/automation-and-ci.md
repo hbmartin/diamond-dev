@@ -238,13 +238,14 @@ your checkbox edit. To automate the resume:
 
 1. Subscribe to `comparison_url` to learn the comparison page is live.
 2. Edit `<slug>-comparison.md` in the wiki repo to check exactly one box, e.g.
-   `- [x] Accept: codex`, and push. (See the README's
-   *Acceptance & Review Judgments* for the exact marker format.)
+   `- [x] Accept: codex`, and push. (See
+   [Acceptance & review artifacts](acceptance-and-review.md) for the exact marker
+   format.)
 3. The running process polls every `acceptance.poll_interval_seconds` (default
    120s) up to `acceptance.max_wait_seconds` (default 4620s) and resumes
    automatically. If the process already exited (e.g. timed out, or you sent
    Ctrl-C → exit 130), simply re-run the same command — it
-   [auto-resumes](../README.md#auto-resume) and picks up your choice.
+   [auto-resumes](repositories-and-resume.md) and picks up your choice.
 
 Tune `[acceptance]` for your automation cadence; lower `poll_interval_seconds`
 resumes faster at the cost of more wiki fetches.

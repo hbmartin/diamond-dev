@@ -12,12 +12,42 @@ from diamond_dev.errors import DiamondDevError
 _SAFE_GENERATED_CHILD_NAME_PATTERN: Final = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9._ -]*[A-Za-z0-9_-])?",
 )
+_ASCII_CONTROL_CHARACTER_LIMIT: Final = 32
+_UNSAFE_DIRECT_CHILD_NAMES: Final[frozenset[str]] = frozenset((".", ".."))
+_WINDOWS_RESERVED_CHILD_NAME_CHARACTERS: Final[frozenset[str]] = frozenset(
+    '<>:"|?*',
+)
+_WINDOWS_RESERVED_DEVICE_NAMES: Final[frozenset[str]] = frozenset(
+    (
+        "AUX",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "CON",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+        "NUL",
+        "PRN",
+    ),
+)
 
 
 def safe_child_path(directory: Path, child_name: str) -> Path:
     """Return a resolved child path that cannot escape its parent directory."""
-    valid_child_name = _validated_direct_child_name(child_name)
-    return _resolved_child_path(directory, valid_child_name, unsafe_name=child_name)
+    return _resolved_child_path(directory, child_name, unsafe_name=child_name)
 
 
 def safe_generated_child_path(directory: Path, child_name: str) -> Path:
@@ -32,8 +62,9 @@ def _resolved_child_path(
     *,
     unsafe_name: str,
 ) -> Path:
+    valid_child_name = _validated_direct_child_name(child_name)
     resolved_directory = directory.resolve(strict=False)
-    resolved_child = resolved_directory.joinpath(child_name).resolve(  # NOSONAR
+    resolved_child = resolved_directory.joinpath(valid_child_name).resolve(  # NOSONAR
         strict=False,
     )
     try:
@@ -47,7 +78,7 @@ def _resolved_child_path(
 
 def _validated_direct_child_name(child_name: str) -> str:
     """Return a direct child name safe for filesystem joins."""
-    if not child_name or child_name in {".", ".."} or "\x00" in child_name:
+    if _is_unsafe_direct_child_name(child_name):
         raise DiamondDevError(f"Unsafe child path: {child_name!r}")
     if _has_path_root_or_separator(child_name):
         raise DiamondDevError(f"Unsafe child path: {child_name!r}")
@@ -76,6 +107,26 @@ def _has_path_root_or_separator(child_name: str) -> bool:
         or windows_path.root != ""
         or windows_path.name != child_name
     )
+
+
+def _is_unsafe_direct_child_name(child_name: str) -> bool:
+    return (
+        not child_name
+        or child_name in _UNSAFE_DIRECT_CHILD_NAMES
+        or child_name.startswith("-")
+        or child_name.endswith((" ", "."))
+        or any(
+            ord(character) < _ASCII_CONTROL_CHARACTER_LIMIT
+            or character in _WINDOWS_RESERVED_CHILD_NAME_CHARACTERS
+            for character in child_name
+        )
+        or _is_windows_reserved_device_name(child_name)
+    )
+
+
+def _is_windows_reserved_device_name(child_name: str) -> bool:
+    device_name = child_name.split(".", maxsplit=1)[0]
+    return device_name.upper() in _WINDOWS_RESERVED_DEVICE_NAMES
 
 
 def read_child_text(directory: Path, child_name: str) -> str:

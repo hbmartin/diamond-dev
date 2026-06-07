@@ -371,6 +371,7 @@ def resolve_plan_path(*, cwd: Path, plan_path: Path) -> Path:
         raise DiamondDevError(f"Plan file not found: {resolved_path}")
     if resolved_path.suffix.lower() != ".md":
         raise DiamondDevError(f"Plan file must be markdown: {resolved_path}")
+    safe_child_path(resolved_path.parent, resolved_path.name)
     return resolved_path
 
 
