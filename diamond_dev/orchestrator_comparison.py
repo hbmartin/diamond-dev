@@ -24,6 +24,7 @@ from diamond_dev.config import read_comparison_judgment_prompt, read_prompt_file
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.notify import notify_url
 from diamond_dev.report import PhaseWarning
+from diamond_dev.workflow import safe_child_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -171,20 +172,25 @@ class ComparisonPhasesMixin:
         return active_context
 
     def _promote_local_comparison(self, context: RunContext) -> None:
-        comparison_markdown = context.comparison_file.read_text(encoding="utf-8")
+        comparison_file = safe_child_path(context.cwd, context.comparison_file.name)
+        comparison_markdown = comparison_file.read_text(encoding="utf-8")
         comparison_markdown = ensure_commit_pair_marker(comparison_markdown, context)
-        context.comparison_file.write_text(
+        comparison_file.write_text(
             ensure_acceptance_checkbox(
                 comparison_markdown,
                 context.implementation.implementer_names,
             ),
             encoding="utf-8",
         )
-        shutil.copy2(context.comparison_file, context.wiki.comparison_file)
+        shutil.copy2(comparison_file, context.wiki.comparison_file)
         paths = [context.wiki.comparison_file.name]
-        if context.comparison_bundle_file.is_file():
+        comparison_bundle_file = safe_child_path(
+            context.cwd,
+            context.comparison_bundle_file.name,
+        )
+        if comparison_bundle_file.is_file():
             shutil.copy2(
-                context.comparison_bundle_file,
+                comparison_bundle_file,
                 context.wiki.comparison_bundle_file,
             )
             paths.append(context.wiki.comparison_bundle_file.name)
@@ -218,7 +224,7 @@ class ComparisonPhasesMixin:
             )
             return context
 
-        plan_file = selected.repo_dir / context.plan.file_name
+        plan_file = safe_child_path(selected.repo_dir, context.plan.file_name)
         plan_file.unlink(missing_ok=True)
         self.git.commit_if_changes(
             selected.repo_dir,
@@ -227,7 +233,10 @@ class ComparisonPhasesMixin:
             paths=(context.plan.file_name,),
         )
 
-        comparison_file = selected.repo_dir / context.plan.comparison_file_name
+        comparison_file = safe_child_path(
+            selected.repo_dir,
+            context.plan.comparison_file_name,
+        )
         shutil.copy2(context.wiki.comparison_file, comparison_file)
         self.git.run(selected.repo_dir, "fetch", log_name="selected-fetch")
 

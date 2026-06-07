@@ -41,3 +41,4 @@ Icon
 triage_decisions.db
 reviews_triage/
 logs/
+.env

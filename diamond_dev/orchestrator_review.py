@@ -23,6 +23,7 @@ from diamond_dev.review_judgments import (
     summarize_review_judgments,
     upsert_structured_judgments_section,
 )
+from diamond_dev.workflow import safe_child_path
 
 if TYPE_CHECKING:
     from diamond_dev.agents import AgentCapability
@@ -58,7 +59,7 @@ class ReviewPhasesMixin:
         phase_warnings: list[PhaseWarning],
     ) -> None:
         self.workflow_provider.sync_wiki(context.wiki.directory)
-        review_file = selected.repo_dir / context.plan.review_file_name
+        review_file = safe_child_path(selected.repo_dir, context.plan.review_file_name)
         if context.wiki.review_file.is_file():
             self._restore_or_validate_review_file(context, review_file)
             self._run_review_fixes(context, selected, phase_warnings)
@@ -193,19 +194,26 @@ class ReviewPhasesMixin:
                 )
             self._restore_or_validate_review_judgments(
                 context,
-                review_file.parent / context.plan.review_judgments_file_name,
+                safe_child_path(
+                    review_file.parent,
+                    context.plan.review_judgments_file_name,
+                ),
             )
             return
         shutil.copy2(context.wiki.review_file, review_file)
         self._restore_or_validate_review_judgments(
             context,
-            review_file.parent / context.plan.review_judgments_file_name,
+            safe_child_path(
+                review_file.parent,
+                context.plan.review_judgments_file_name,
+            ),
         )
 
     def _promote_review_file(self, context: RunContext, review_file: Path) -> None:
         review_markdown = review_file.read_text(encoding="utf-8")
-        review_judgments_file = (
-            review_file.parent / context.plan.review_judgments_file_name
+        review_judgments_file = safe_child_path(
+            review_file.parent,
+            context.plan.review_judgments_file_name,
         )
         judgment_status = read_review_judgments_status(review_judgments_file)
         needs_input_from_sidecar = False

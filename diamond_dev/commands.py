@@ -5,6 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
+
+_DO_NOT_PUSH_INSTRUCTION: Final = (
+    "- Do not push; diamond-dev will push committed work."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,7 +166,7 @@ def initial_implementation_prompt(
         required_lines=(
             f"- Plan file: `{plan_file_name}`",
             "- Commit your changes on the current branch.",
-            "- Do not push; diamond-dev will push committed work.",
+            _DO_NOT_PUSH_INSTRUCTION,
         ),
     )
 
@@ -179,7 +184,7 @@ def comparison_implementation_prompt(
             "- Inspect the current branch first because this prompt may be rerun.",
             "- Avoid duplicating work that is already applied.",
             "- Commit your changes.",
-            "- Do not push; diamond-dev will push committed work.",
+            _DO_NOT_PUSH_INSTRUCTION,
         ),
     )
 
@@ -211,7 +216,7 @@ def review_judgment_prompt(
             "- Append your judgements to the review file without removing "
             "existing content.",
             "- Commit the updated review file and structured judgment sidecar.",
-            "- Do not push; diamond-dev will push committed work.",
+            _DO_NOT_PUSH_INSTRUCTION,
         ),
     )
 
@@ -239,7 +244,7 @@ def review_fix_prompt(
             "- Inspect the current branch first because this prompt may be rerun.",
             "- Avoid duplicating work that is already applied.",
             "- Commit your changes.",
-            "- Do not push; diamond-dev will push committed work.",
+            _DO_NOT_PUSH_INSTRUCTION,
         ),
     )
 

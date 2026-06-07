@@ -62,10 +62,13 @@ def test_github_actions_are_pinned_to_full_commit_shas() -> None:
     assert mutable_references == []
 
 
-def test_ci_default_permissions_are_read_only() -> None:
+def test_ci_lint_job_permissions_are_read_only() -> None:
     workflow = _load_ci_workflow()
-    permissions = _required_mapping(workflow, "permissions")
+    jobs = _required_mapping(workflow, "jobs")
+    lint_job = _required_mapping(jobs, "lint-type-test")
+    permissions = _required_mapping(lint_job, "permissions")
 
+    assert "permissions" not in workflow
     assert permissions["contents"] == "read"
     assert permissions.get("issues") != "write"
     assert all(value != "write" for value in permissions.values())

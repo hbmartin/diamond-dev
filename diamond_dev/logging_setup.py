@@ -135,54 +135,79 @@ def _env_bool(name: str, *, default: bool) -> bool:
 def _trace_context_patcher() -> Callable[[Record], None]:
     try:
         trace_module = import_module("opentelemetry.trace")
-    except (ImportError, ModuleNotFoundError):
+    except (ImportError,):
         return _add_default_trace_context
 
-    get_current_span = getattr(trace_module, "get_current_span", None)
-    get_tracer_provider = getattr(trace_module, "get_tracer_provider", None)
-    if not callable(get_current_span) or not callable(get_tracer_provider):
+    trace_context = _trace_context(trace_module)
+    if trace_context is None:
         return _add_default_trace_context
 
-    invalid_span = getattr(trace_module, "INVALID_SPAN", None)
-    invalid_span_context = getattr(trace_module, "INVALID_SPAN_CONTEXT", None)
-    provider = get_tracer_provider()
-    service_name: str | None = None
+    get_current_span, invalid_span, invalid_span_context, service_name = trace_context
 
     def add_trace_context(record: Record) -> None:
         _add_default_trace_context(record)
-
-        nonlocal service_name
-        if service_name is None:
-            resource = getattr(provider, "resource", None)
-            attributes = getattr(resource, "attributes", {})
-            if isinstance(attributes, Mapping):
-                service_name = str(attributes.get("service.name") or "")
-            else:
-                service_name = ""
-
         record["extra"]["otelServiceName"] = service_name
-        span = get_current_span()
-        if span == invalid_span:
-            return
-
-        get_span_context = getattr(span, "get_span_context", None)
-        if not callable(get_span_context):
-            return
-
-        context = get_span_context()
-        if context == invalid_span_context:
-            return
-
-        span_id = getattr(context, "span_id", 0)
-        trace_id = getattr(context, "trace_id", 0)
-        trace_flags = getattr(context, "trace_flags", None)
-        record["extra"]["otelSpanID"] = _format_otel_id(span_id, width=16)
-        record["extra"]["otelTraceID"] = _format_otel_id(trace_id, width=32)
-        record["extra"]["otelTraceSampled"] = bool(
-            getattr(trace_flags, "sampled", False),
+        _add_span_context(
+            record,
+            span=get_current_span(),
+            invalid_span=invalid_span,
+            invalid_span_context=invalid_span_context,
         )
 
     return add_trace_context
+
+
+def _trace_context(
+    trace_module: object,
+) -> tuple[Callable[[], object], object, object, str] | None:
+    get_current_span = getattr(trace_module, "get_current_span", None)
+    get_tracer_provider = getattr(trace_module, "get_tracer_provider", None)
+    if not callable(get_current_span) or not callable(get_tracer_provider):
+        return None
+
+    provider = get_tracer_provider()
+    return (
+        get_current_span,
+        getattr(trace_module, "INVALID_SPAN", None),
+        getattr(trace_module, "INVALID_SPAN_CONTEXT", None),
+        _otel_service_name(provider),
+    )
+
+
+def _otel_service_name(provider: object) -> str:
+    resource = getattr(provider, "resource", None)
+    attributes = getattr(resource, "attributes", {})
+    if isinstance(attributes, Mapping):
+        return str(attributes.get("service.name") or "")
+    return ""
+
+
+def _add_span_context(
+    record: Record,
+    *,
+    span: object,
+    invalid_span: object,
+    invalid_span_context: object,
+) -> None:
+    if span == invalid_span:
+        return
+
+    get_span_context = getattr(span, "get_span_context", None)
+    if not callable(get_span_context):
+        return
+
+    context = get_span_context()
+    if context == invalid_span_context:
+        return
+
+    span_id = getattr(context, "span_id", 0)
+    trace_id = getattr(context, "trace_id", 0)
+    trace_flags = getattr(context, "trace_flags", None)
+    record["extra"]["otelSpanID"] = _format_otel_id(span_id, width=16)
+    record["extra"]["otelTraceID"] = _format_otel_id(trace_id, width=32)
+    record["extra"]["otelTraceSampled"] = bool(
+        getattr(trace_flags, "sampled", False),
+    )
 
 
 def _add_default_trace_context(record: Record) -> None:
