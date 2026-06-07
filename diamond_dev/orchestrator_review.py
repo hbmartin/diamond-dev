@@ -23,7 +23,12 @@ from diamond_dev.review_judgments import (
     summarize_review_judgments,
     upsert_structured_judgments_section,
 )
-from diamond_dev.workflow import safe_child_path
+from diamond_dev.workflow import (
+    copy_child_file,
+    read_child_text,
+    safe_child_path,
+    write_child_text,
+)
 
 if TYPE_CHECKING:
     from diamond_dev.agents import AgentCapability
@@ -210,7 +215,13 @@ class ReviewPhasesMixin:
         )
 
     def _promote_review_file(self, context: RunContext, review_file: Path) -> None:
-        review_markdown = review_file.read_text(encoding="utf-8")
+        review_file = safe_child_path(review_file.parent, review_file.name)
+        if review_file.name != context.plan.review_file_name:
+            raise DiamondDevError(f"Unexpected review file: {review_file}")
+        review_markdown = read_child_text(
+            review_file.parent,
+            context.plan.review_file_name,
+        )
         review_judgments_file = safe_child_path(
             review_file.parent,
             context.plan.review_judgments_file_name,
@@ -223,12 +234,22 @@ class ReviewPhasesMixin:
                 review_markdown,
                 judgment_status.judgments,
             )
-            review_file.write_text(review_markdown, encoding="utf-8")
-            review_judgments_file.write_text(
-                canonical_review_judgments_json(judgment_status.judgments),
-                encoding="utf-8",
+            write_child_text(
+                review_file.parent,
+                context.plan.review_file_name,
+                review_markdown,
             )
-            shutil.copy2(review_judgments_file, context.wiki.review_judgments_file)
+            write_child_text(
+                review_file.parent,
+                context.plan.review_judgments_file_name,
+                canonical_review_judgments_json(judgment_status.judgments),
+            )
+            copy_child_file(
+                source_dir=review_file.parent,
+                source_name=context.plan.review_judgments_file_name,
+                destination_dir=context.wiki.directory,
+                destination_name=context.wiki.review_judgments_file.name,
+            )
             paths.append(context.wiki.review_judgments_file.name)
             needs_input_from_sidecar = (
                 summarize_review_judgments(judgment_status.judgments).needs_input > 0
@@ -251,7 +272,12 @@ class ReviewPhasesMixin:
                 label="review input needed",
             )
 
-        shutil.copy2(review_file, context.wiki.review_file)
+        copy_child_file(
+            source_dir=review_file.parent,
+            source_name=context.plan.review_file_name,
+            destination_dir=context.wiki.directory,
+            destination_name=context.wiki.review_file.name,
+        )
         self.git.commit_if_changes(
             context.wiki.directory,
             message=f"Add {context.plan.slug} review",

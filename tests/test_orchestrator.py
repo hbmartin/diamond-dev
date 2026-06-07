@@ -6,6 +6,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -294,15 +295,19 @@ class _ScriptedRunner(CommandRunner):
         )
 
     def _accept_comparison(self, cwd: Path) -> None:
-        for comparison_path in cwd.glob("*-comparison.md"):
-            comparison_markdown = comparison_path.read_text(encoding="utf-8")
-            comparison_path.write_text(
-                comparison_markdown.replace(
-                    "- [ ] Accept: (codex/claude)",
-                    "- [x] Accept: codex",
-                ),
-                encoding="utf-8",
-            )
+        comparison_name = "my-plan-comparison.md"
+        comparison_path = workflow.safe_child_path(cwd, comparison_name)
+        if not comparison_path.is_file():
+            return
+        comparison_markdown = workflow.read_child_text(cwd, comparison_name)
+        workflow.write_child_text(
+            cwd,
+            comparison_name,
+            comparison_markdown.replace(
+                "- [ ] Accept: (codex/claude)",
+                "- [x] Accept: codex",
+            ),
+        )
 
 
 class _CodeRabbitFailureRunner(_ScriptedRunner):
@@ -1209,7 +1214,10 @@ def test_checkout_commit_pair_branch_fetches_local_commit_and_uses_remote_branch
     context = build_commit_pair_context(tmp_path)
     assert context.commit_pair is not None
     branch = context.implementation.branches[0]
-    entry = replace(context.commit_pair.entries[0], source="local")
+    entry = cast(
+        CommitPairEntry,
+        replace(context.commit_pair.entries[0], source="local"),
+    )
     runner = _RecordingRunner()
     orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
     monkeypatch.setattr(
@@ -2383,13 +2391,16 @@ def test_poll_acceptance_skips_missing_wiki_comparison_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base_context = build_context(tmp_path)
-    context = replace(
-        base_context,
-        config=replace(
-            base_context.config,
-            acceptance=AcceptanceConfig(
-                poll_interval_seconds=2,
-                max_wait_seconds=5,
+    context = cast(
+        RunContext,
+        replace(
+            base_context,
+            config=replace(
+                base_context.config,
+                acceptance=AcceptanceConfig(
+                    poll_interval_seconds=2,
+                    max_wait_seconds=5,
+                ),
             ),
         ),
     )

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.naming import (
@@ -77,6 +78,32 @@ def safe_child_path(directory: Path, child_name: str) -> Path:
             f"Child path escapes parent directory: {child_name!r}",
         ) from error
     return resolved_child
+
+
+def read_child_text(directory: Path, child_name: str) -> str:
+    """Read a validated direct child text file."""
+    return safe_child_path(directory, child_name).read_text(encoding="utf-8")
+
+
+def write_child_text(directory: Path, child_name: str, text: str) -> Path:
+    """Write a validated direct child text file and return its resolved path."""
+    child_path = safe_child_path(directory, child_name)
+    child_path.write_text(text, encoding="utf-8")
+    return child_path
+
+
+def copy_child_file(
+    *,
+    source_dir: Path,
+    source_name: str,
+    destination_dir: Path,
+    destination_name: str,
+) -> Path:
+    """Copy one validated direct child file to another validated child path."""
+    source_path = safe_child_path(source_dir, source_name)
+    destination_path = safe_child_path(destination_dir, destination_name)
+    shutil.copy2(source_path, destination_path)
+    return destination_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,7 +280,7 @@ class RunContext:
         implementation: ImplementationContext,
     ) -> RunContext:
         """Return a copy with updated implementation repository details."""
-        return replace(self, implementation=implementation)
+        return cast("RunContext", replace(self, implementation=implementation))
 
     def with_commit_pair_entries(
         self,
@@ -283,19 +310,25 @@ class RunContext:
             ),
             base_branch=self.implementation.base_branch,
         )
-        return replace(
-            self,
-            implementation=implementation,
-            commit_pair=CommitPairContext(slug=commit_pair.slug, entries=entries),
+        return cast(
+            "RunContext",
+            replace(
+                self,
+                implementation=implementation,
+                commit_pair=CommitPairContext(slug=commit_pair.slug, entries=entries),
+            ),
         )
 
     def with_dirty_record(self, dirty_record: DirtyRecord) -> RunContext:
         """Return a copy with an added dirty-file record."""
-        return replace(self, dirty_records=(*self.dirty_records, dirty_record))
+        return cast(
+            "RunContext",
+            replace(self, dirty_records=(*self.dirty_records, dirty_record)),
+        )
 
     def with_pr_url(self, pr_url: str) -> RunContext:
         """Return a copy with the created pull request URL."""
-        return replace(self, pr_url=pr_url)
+        return cast("RunContext", replace(self, pr_url=pr_url))
 
 
 @dataclass(frozen=True, slots=True, init=False)

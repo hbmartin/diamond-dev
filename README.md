@@ -66,6 +66,7 @@ flowchart TD
 
 **Reference**
 
+- [Advanced guides](#advanced-guides)
 - [Prompts](#prompts)
 - [Generated Repositories](#generated-repositories)
 - [Auto-Resume](#auto-resume)
@@ -347,6 +348,12 @@ Detailed behavior for when you need it — prompt internals, generated
 repositories, resume semantics, acceptance and review artifacts, security, and
 logging. The Getting Started sections above cover the common path; reach for
 these when something surprises you.
+
+## Advanced guides
+
+For deeper setup and operations topics, start with the
+[advanced usage index](docs/README.md). It links to focused guides for custom
+prompts, automation and CI integration, and observability.
 
 ## Prompts
 
