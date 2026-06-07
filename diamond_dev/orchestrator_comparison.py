@@ -26,10 +26,11 @@ from diamond_dev.notify import notify_url
 from diamond_dev.report import PhaseWarning
 from diamond_dev.workflow import (
     LOCAL_COMPARISON_FILE_NAME,
-    copy_child_file,
-    read_child_text,
+    copy_generated_child_file,
+    read_generated_child_text,
     safe_child_path,
-    write_child_text,
+    safe_generated_child_path,
+    write_generated_child_text,
 )
 
 if TYPE_CHECKING:
@@ -179,12 +180,12 @@ class ComparisonPhasesMixin:
         return active_context
 
     def _promote_local_comparison(self, context: RunContext) -> None:
-        comparison_markdown = read_child_text(
+        comparison_markdown = read_generated_child_text(
             context.cwd,
             LOCAL_COMPARISON_FILE_NAME,
         )
         comparison_markdown = ensure_commit_pair_marker(comparison_markdown, context)
-        write_child_text(
+        write_generated_child_text(
             context.cwd,
             LOCAL_COMPARISON_FILE_NAME,
             ensure_acceptance_checkbox(
@@ -192,7 +193,7 @@ class ComparisonPhasesMixin:
                 context.implementation.implementer_names,
             ),
         )
-        copy_child_file(
+        copy_generated_child_file(
             source_dir=context.cwd,
             source_name=LOCAL_COMPARISON_FILE_NAME,
             destination_dir=context.wiki.directory,
@@ -201,7 +202,7 @@ class ComparisonPhasesMixin:
         paths = [context.wiki.comparison_file.name]
         comparison_bundle_file = context.comparison_bundle_file
         if comparison_bundle_file.is_file():
-            copy_child_file(
+            copy_generated_child_file(
                 source_dir=context.cwd,
                 source_name=context.plan.comparison_bundle_file_name,
                 destination_dir=context.wiki.directory,
@@ -247,7 +248,7 @@ class ComparisonPhasesMixin:
             paths=(context.plan.file_name,),
         )
 
-        comparison_file = safe_child_path(
+        comparison_file = safe_generated_child_path(
             selected.repo_dir,
             context.plan.comparison_file_name,
         )

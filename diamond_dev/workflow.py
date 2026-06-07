@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
@@ -14,13 +12,48 @@ from diamond_dev.naming import (
     slug_for_plan,
     wiki_directory_name,
 )
+from diamond_dev.path_safety import (
+    copy_child_file,
+    copy_generated_child_file,
+    read_child_text,
+    read_generated_child_text,
+    safe_child_path,
+    safe_generated_child_path,
+    write_child_text,
+    write_generated_child_text,
+)
 
 if TYPE_CHECKING:
     from diamond_dev.config import DiamondDevConfig
 
 
+__all__ = (
+    "LOCAL_COMPARISON_FILE_NAME",
+    "CommitMetadata",
+    "CommitPairContext",
+    "CommitPairEntry",
+    "DirtyRecord",
+    "ImplementationBranch",
+    "ImplementationContext",
+    "PlanContext",
+    "RunContext",
+    "SelectedImplementation",
+    "WikiContext",
+    "build_commit_pair_run_context",
+    "build_run_context",
+    "copy_child_file",
+    "copy_generated_child_file",
+    "read_child_text",
+    "read_generated_child_text",
+    "resolve_plan_path",
+    "safe_child_path",
+    "safe_generated_child_path",
+    "selected_implementation",
+    "write_child_text",
+    "write_generated_child_text",
+)
+
 LOCAL_COMPARISON_FILE_NAME: Final = "comparison.md"
-_SAFE_CHILD_NAME_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,58 +96,6 @@ class PlanContext:
     def review_judgments_file_name(self) -> str:
         """Return the structured review judgment sidecar filename."""
         return f"{self.slug}-review-judgments.json"
-
-
-def safe_child_path(directory: Path, child_name: str) -> Path:
-    """Return a resolved child path that cannot escape its parent directory."""
-    valid_child_name = _validated_child_name(child_name)
-    resolved_directory = directory.resolve(strict=False)
-    resolved_child = resolved_directory.joinpath(valid_child_name).resolve(  # NOSONAR
-        strict=False,
-    )
-    try:
-        resolved_child.relative_to(resolved_directory)
-    except (ValueError,) as error:
-        raise DiamondDevError(
-            f"Child path escapes parent directory: {child_name!r}",
-        ) from error
-    return resolved_child
-
-
-def _validated_child_name(child_name: str) -> str:
-    """Return a direct generated child name safe for filesystem joins."""
-    child_path = Path(child_name)
-    if not child_name or child_path.is_absolute() or child_path.name != child_name:
-        raise DiamondDevError(f"Unsafe child path: {child_name!r}")
-    if _SAFE_CHILD_NAME_PATTERN.fullmatch(child_name) is None:
-        raise DiamondDevError(f"Unsafe child path: {child_name!r}")
-    return child_name
-
-
-def read_child_text(directory: Path, child_name: str) -> str:
-    """Read a validated direct child text file."""
-    return safe_child_path(directory, child_name).read_text(encoding="utf-8")
-
-
-def write_child_text(directory: Path, child_name: str, text: str) -> Path:
-    """Write a validated direct child text file and return its resolved path."""
-    child_path = safe_child_path(directory, child_name)
-    child_path.write_text(text, encoding="utf-8")
-    return child_path
-
-
-def copy_child_file(
-    *,
-    source_dir: Path,
-    source_name: str,
-    destination_dir: Path,
-    destination_name: str,
-) -> Path:
-    """Copy one validated direct child file to another validated child path."""
-    source_path = safe_child_path(source_dir, source_name)
-    destination_path = safe_child_path(destination_dir, destination_name)
-    shutil.copy2(source_path, destination_path)
-    return destination_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,12 +260,15 @@ class RunContext:
     @property
     def comparison_file(self) -> Path:
         """Return the local comparison artifact path."""
-        return safe_child_path(self.cwd, LOCAL_COMPARISON_FILE_NAME)
+        return safe_generated_child_path(self.cwd, LOCAL_COMPARISON_FILE_NAME)
 
     @property
     def comparison_bundle_file(self) -> Path:
         """Return the local comparison bundle artifact path."""
-        return safe_child_path(self.cwd, self.plan.comparison_bundle_file_name)
+        return safe_generated_child_path(
+            self.cwd,
+            self.plan.comparison_bundle_file_name,
+        )
 
     def with_implementation(
         self,
@@ -431,13 +415,13 @@ def build_commit_pair_run_context(
     return RunContext(
         cwd=cwd,
         config=config,
-        plan=PlanContext(path=safe_child_path(cwd, f"{slug}.md"), slug=slug),
+        plan=PlanContext(path=safe_generated_child_path(cwd, f"{slug}.md"), slug=slug),
         wiki=_wiki_context(wiki_url=wiki_url, wiki_dir=wiki_dir, slug=slug),
         implementation=ImplementationContext(
             branches=tuple(
                 ImplementationBranch(
                     agent_name=entry.label,
-                    repo_dir=safe_child_path(cwd, f"{entry.label}-{slug}"),
+                    repo_dir=safe_generated_child_path(cwd, f"{entry.label}-{slug}"),
                     branch=entry.branch,
                     log_prefix=entry.label,
                 )
@@ -473,7 +457,7 @@ def _implementation_branch(
 ) -> ImplementationBranch:
     return ImplementationBranch(
         agent_name=agent_name,
-        repo_dir=safe_child_path(cwd, f"{agent_name}-{plan_slug}"),
+        repo_dir=safe_generated_child_path(cwd, f"{agent_name}-{plan_slug}"),
         branch=f"{agent_name}/{plan_slug}",
         log_prefix=agent_name,
     )
@@ -483,13 +467,13 @@ def _wiki_context(*, wiki_url: str, wiki_dir: Path, slug: str) -> WikiContext:
     return WikiContext(
         url=wiki_url,
         directory=wiki_dir,
-        comparison_file=safe_child_path(wiki_dir, f"{slug}-comparison.md"),
-        comparison_bundle_file=safe_child_path(
+        comparison_file=safe_generated_child_path(wiki_dir, f"{slug}-comparison.md"),
+        comparison_bundle_file=safe_generated_child_path(
             wiki_dir,
             f"{slug}-comparison-bundle.md",
         ),
-        review_file=safe_child_path(wiki_dir, f"{slug}-review.md"),
-        review_judgments_file=safe_child_path(
+        review_file=safe_generated_child_path(wiki_dir, f"{slug}-review.md"),
+        review_judgments_file=safe_generated_child_path(
             wiki_dir,
             f"{slug}-review-judgments.json",
         ),

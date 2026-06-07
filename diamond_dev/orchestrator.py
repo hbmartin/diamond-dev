@@ -554,7 +554,7 @@ class DiamondDevOrchestrator(
         return True, context, False
 
     def _ensure_agent_plan_copy(self, context: RunContext, repo_dir: Path) -> None:
-        repo_plan = repo_dir / context.plan.file_name
+        repo_plan = workflow.safe_child_path(repo_dir, context.plan.file_name)
         source_plan_markdown = read_normalized_markdown(context.plan.path)
         if repo_plan.is_file():
             repo_plan_markdown = read_normalized_markdown(repo_plan)

@@ -1961,6 +1961,61 @@ def test_run_comparison_fixer_records_warning_when_agent_fails(
     assert ("git", "push", "-u", "origin", context.implementation.codex_branch) in runner.commands
 
 
+@pytest.mark.parametrize("plan_file_name", ["auth (draft).md", "计划.md"])
+def test_run_comparison_fixer_accepts_direct_user_plan_filename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    plan_file_name: str,
+) -> None:
+    context = build_context(tmp_path)
+    context = replace(
+        context,
+        plan=PlanContext(path=tmp_path / plan_file_name, slug=context.plan.slug),
+    )
+    context.plan.path.write_text("# Source Plan\n", encoding="utf-8")
+    selected_repo = context.implementation.codex_dir
+    selected_repo.mkdir()
+    (selected_repo / context.plan.file_name).write_text(
+        "# Source Plan\n",
+        encoding="utf-8",
+    )
+    context.wiki.directory.mkdir()
+    context.wiki.comparison_file.write_text("Comparison\n", encoding="utf-8")
+    selected = SelectedImplementation(
+        accepted_agent="codex",
+        opposite_agent="claude",
+        repo_dir=selected_repo,
+        branch=context.implementation.codex_branch,
+    )
+    runner = _RecordingRunner()
+    orchestrator = DiamondDevOrchestrator(cwd=tmp_path, runner=runner)
+    phase_warnings: list[PhaseWarning] = []
+
+    def run_agent(**_kwargs: object) -> CommandResult:
+        return CommandResult(
+            command=("claude", "comparison"),
+            cwd=selected_repo,
+            returncode=0,
+            log_path=selected_repo / "claude-comparison-agent.log",
+            output="",
+        )
+
+    monkeypatch.setattr(orchestrator.workflow_provider, "sync_wiki", lambda _wiki_dir: None)
+    monkeypatch.setattr(orchestrator.git, "commit_if_changes", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(orchestrator, "_run_agent", run_agent)
+
+    updated_context = orchestrator._run_comparison_fixer(  # noqa: SLF001
+        context,
+        selected,
+        phase_warnings,
+    )
+
+    assert updated_context == context
+    assert phase_warnings == []
+    assert not (selected_repo / context.plan.file_name).exists()
+    assert not (selected_repo / context.plan.comparison_file_name).exists()
+
+
 def test_prepare_wiki_with_plan_fails_on_plan_drift(tmp_path: Path) -> None:
     context = build_context(tmp_path)
     context.plan.path.write_text("# Source Plan\n", encoding="utf-8")
