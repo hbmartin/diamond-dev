@@ -111,7 +111,7 @@ def test_main_logs_diamond_dev_errors_without_traceback(
 def test_env_bool_parses_known_values_and_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    env_bool = logging_setup._env_bool
+    env_bool = logging_setup._env_bool  # noqa: SLF001
 
     monkeypatch.setenv("DIAMOND_DEV_TEST_BOOL", " yes ")
     assert env_bool("DIAMOND_DEV_TEST_BOOL", default=False) is True
@@ -154,7 +154,7 @@ def test_trace_context_patcher_adds_current_span_metadata(
         return TraceModule
 
     monkeypatch.setattr(logging_setup, "import_module", import_trace_module)
-    patcher = logging_setup._trace_context_patcher()
+    patcher = logging_setup._trace_context_patcher()  # noqa: SLF001
     record: dict[str, dict[str, object]] = {"extra": {}}
 
     patcher(record)
@@ -166,7 +166,7 @@ def test_trace_context_patcher_adds_current_span_metadata(
 
 
 def test_trace_context_returns_none_for_incomplete_trace_module() -> None:
-    trace_context = logging_setup._trace_context
+    trace_context = logging_setup._trace_context  # noqa: SLF001
 
     assert trace_context(object()) is None
 
@@ -186,7 +186,7 @@ def test_trace_context_returns_none_for_incomplete_trace_module() -> None:
 
 
 def test_add_span_context_ignores_invalid_spans_and_formats_non_int_ids() -> None:
-    add_span_context = logging_setup._add_span_context
+    add_span_context = logging_setup._add_span_context  # noqa: SLF001
     invalid_span = object()
     invalid_context = object()
     record: dict[str, dict[str, object]] = {"extra": {"kept": True}}

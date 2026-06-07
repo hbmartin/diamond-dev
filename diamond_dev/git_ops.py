@@ -30,7 +30,7 @@ class GitHubGitOperations(Protocol):
 
     def sync_wiki(self, wiki_dir: Path) -> None:
         """Fetch and fast-forward the wiki repository."""
-        ...
+        raise NotImplementedError
 
     def run(
         self,
@@ -40,7 +40,7 @@ class GitHubGitOperations(Protocol):
         check: bool = True,
     ) -> CommandResult:
         """Run a git command in a repository."""
-        ...
+        raise NotImplementedError
 
     def remote_url_branch_exists(
         self,
@@ -51,7 +51,7 @@ class GitHubGitOperations(Protocol):
         log_name: str,
     ) -> bool:
         """Return whether a branch exists on a remote URL."""
-        ...
+        raise NotImplementedError
 
 
 class ComparisonGitOperations(Protocol):
@@ -65,11 +65,11 @@ class ComparisonGitOperations(Protocol):
         check: bool = True,
     ) -> CommandResult:
         """Run a git command in a repository."""
-        ...
+        raise NotImplementedError
 
     def revision(self, repo_dir: Path, ref: str, *, log_name: str) -> str:
         """Return the commit revision for a ref."""
-        ...
+        raise NotImplementedError
 
     def branch_ahead_behind(
         self,
@@ -80,7 +80,7 @@ class ComparisonGitOperations(Protocol):
         log_name: str,
     ) -> BranchAheadBehind:
         """Return ahead and behind counts for a branch against origin/base."""
-        ...
+        raise NotImplementedError
 
     def record_dirty_files(
         self,
@@ -92,7 +92,7 @@ class ComparisonGitOperations(Protocol):
         log_prefix: str | None = None,
     ) -> RunContext:
         """Append dirty files observed after an agent phase."""
-        ...
+        raise NotImplementedError
 
 
 class GitOperations:

@@ -1819,7 +1819,7 @@ def test_run_comparison_judgment_ignores_stale_wiki_marker_and_fails_without_out
         ),
     )
 
-    with pytest.raises(DiamondDevError, match="did not write comparison.md"):
+    with pytest.raises(DiamondDevError, match=r"did not write comparison\.md"):
         orchestrator._run_comparison_judgment(context)  # noqa: SLF001
 
 

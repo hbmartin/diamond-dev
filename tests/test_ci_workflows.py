@@ -51,6 +51,23 @@ def _job_permissions(job: object) -> dict[str, object]:
     return permissions
 
 
+def _ci_step_commands() -> dict[str, str]:
+    workflow = _load_ci_workflow()
+    jobs = _required_mapping(workflow, "jobs")
+    lint_job = _required_mapping(jobs, "lint-type-test")
+    steps = lint_job["steps"]
+    assert isinstance(steps, list)
+
+    commands: dict[str, str] = {}
+    for step in steps:
+        assert isinstance(step, dict)
+        name = step.get("name")
+        run = step.get("run")
+        if isinstance(name, str) and isinstance(run, str):
+            commands[name] = run.strip()
+    return commands
+
+
 def _assert_no_write_permissions(permissions: dict[str, object]) -> None:
     assert all(value != "write" for value in permissions.values())
 
@@ -81,6 +98,13 @@ def test_ci_lint_job_permissions_are_read_only() -> None:
     permissions = _required_mapping(lint_job, "permissions")
 
     assert permissions == {"contents": "read"}
+
+
+def test_ci_lint_job_runs_static_type_checkers() -> None:
+    commands = _ci_step_commands()
+
+    assert commands["Run Pyrefly"] == "uv run pyrefly check diamond_dev"
+    assert commands["Run ty"] == "uv run ty check diamond_dev"
 
 
 def test_ci_pr_write_permission_is_isolated_to_pylint_comment_job() -> None:

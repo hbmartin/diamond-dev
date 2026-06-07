@@ -42,7 +42,7 @@ class StartedCommand(Protocol):
 
     def wait(self) -> CommandResult:
         """Wait for command completion."""
-        ...
+        raise NotImplementedError
 
 
 class CommandExecutor(Protocol):
@@ -57,7 +57,7 @@ class CommandExecutor(Protocol):
         check: bool = True,
     ) -> CommandResult:
         """Run a command and return its result."""
-        ...
+        raise NotImplementedError
 
 
 class FileCommandExecutor(Protocol):
@@ -73,7 +73,7 @@ class FileCommandExecutor(Protocol):
         check: bool = True,
     ) -> CommandResult:
         """Run a command and write captured output to a file."""
-        ...
+        raise NotImplementedError
 
 
 class AsyncCommandExecutor(Protocol):
@@ -87,7 +87,7 @@ class AsyncCommandExecutor(Protocol):
         log_name: str,
     ) -> StartedCommand:
         """Start a command and return a waitable process."""
-        ...
+        raise NotImplementedError
 
 
 class InteractiveCommandExecutor(Protocol):
@@ -102,7 +102,7 @@ class InteractiveCommandExecutor(Protocol):
         check: bool = True,
     ) -> CommandResult:
         """Run an interactive command."""
-        ...
+        raise NotImplementedError
 
 
 class CommandRunnerLike(

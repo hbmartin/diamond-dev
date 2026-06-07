@@ -1,0 +1,30 @@
+rules:
+  - id: diamond-dev.path-exists-before-read-text
+    languages:
+      - python
+    message: Use Path.is_file() before read_text() when the path is expected to be a file.
+    severity: WARNING
+    pattern: |
+      if $PATH.exists():
+          ...
+          $PATH.read_text(...)
+
+  - id: diamond-dev.safe-child-path-derived-name-sink
+    languages:
+      - python
+    message: Use a literal or validated child filename at filesystem sinks instead of deriving it from Path.name.
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $TARGET = safe_child_path($DIR, $SOURCE.name)
+              ...
+              $TARGET.read_text(...)
+          - pattern: |
+              $TARGET = safe_child_path($DIR, $SOURCE.name)
+              ...
+              $TARGET.write_text(...)
+          - pattern: |
+              $TARGET = safe_child_path($DIR, $SOURCE.name)
+              ...
+              shutil.copy2($TARGET, ...)
