@@ -19,6 +19,7 @@ DEFAULT_IMPLEMENTERS: Final = ("codex", "claude")
 DEFAULT_COMPARISON_MAX_TOTAL_DIFF_BYTES: Final = 200_000
 DEFAULT_COMPARISON_MAX_FILE_DIFF_BYTES: Final = 40_000
 DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES: Final = 20_000
+DEFAULT_COMPARISON_MAX_SIGNAL_OUTPUT_BYTES: Final = 20_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,9 +154,11 @@ class ComparisonConfig:
     """Comparison bundle generation settings."""
 
     test_commands: tuple[str, ...] = ()
+    signal_commands: tuple[str, ...] = ()
     max_total_diff_bytes: int = DEFAULT_COMPARISON_MAX_TOTAL_DIFF_BYTES
     max_file_diff_bytes: int = DEFAULT_COMPARISON_MAX_FILE_DIFF_BYTES
     max_test_output_bytes: int = DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES
+    max_signal_output_bytes: int = DEFAULT_COMPARISON_MAX_SIGNAL_OUTPUT_BYTES
 
 
 @dataclass(frozen=True, slots=True)

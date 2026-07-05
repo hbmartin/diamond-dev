@@ -14,6 +14,7 @@ from diamond_dev.agents import AgentAdapter, resolve_adapter
 from diamond_dev.config.schema import (
     CONFIG_FILE_NAME,
     DEFAULT_COMPARISON_MAX_FILE_DIFF_BYTES,
+    DEFAULT_COMPARISON_MAX_SIGNAL_OUTPUT_BYTES,
     DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES,
     DEFAULT_COMPARISON_MAX_TOTAL_DIFF_BYTES,
     DEFAULT_IMPLEMENTERS,
@@ -356,6 +357,11 @@ def _load_comparison(raw_config: dict[str, Any], config_path: Path) -> Compariso
             "test_commands",
             "`comparison.test_commands`",
         ) or (),
+        signal_commands=optional_string_sequence(
+            comparison,
+            "signal_commands",
+            "`comparison.signal_commands`",
+        ) or (),
         max_total_diff_bytes=optional_positive_int(
             comparison,
             "max_total_diff_bytes",
@@ -371,6 +377,11 @@ def _load_comparison(raw_config: dict[str, Any], config_path: Path) -> Compariso
             "max_test_output_bytes",
             "`comparison.max_test_output_bytes`",
         ) or DEFAULT_COMPARISON_MAX_TEST_OUTPUT_BYTES,
+        max_signal_output_bytes=optional_positive_int(
+            comparison,
+            "max_signal_output_bytes",
+            "`comparison.max_signal_output_bytes`",
+        ) or DEFAULT_COMPARISON_MAX_SIGNAL_OUTPUT_BYTES,
     )
 
 
