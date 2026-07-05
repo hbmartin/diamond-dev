@@ -1,0 +1,54 @@
+site_name: diamond-dev
+site_description: Run one plan through competing coding agents, pick the winner, ship a PR.
+site_url: https://hbmartin.github.io/diamond-dev/
+repo_url: https://github.com/hbmartin/diamond-dev
+repo_name: hbmartin/diamond-dev
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Overview: README.md
+  - Architecture: architecture.md
+  - Agents: agents.md
+  - Configuration: configuration.md
+  - Custom prompts: custom-prompts.md
+  - Acceptance & review: acceptance-and-review.md
+  - Repositories & resume: repositories-and-resume.md
+  - Two-commit mode: two-commit-mode.md
+  - Automation & CI: automation-and-ci.md
+  - Observability: observability.md
+  - Troubleshooting: troubleshooting.md
