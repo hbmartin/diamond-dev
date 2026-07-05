@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from loguru import logger
 
-from diamond_dev.commands import build_pnpm_install_command, build_uv_sync_command
+from diamond_dev.commands import (
+    build_cargo_fetch_command,
+    build_pnpm_install_command,
+    build_uv_sync_command,
+)
 from diamond_dev.commit_pair import commit_pair_entries_avoiding_base_branch
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.markdown import read_normalized_markdown
 from diamond_dev.workflow import safe_child_path
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from diamond_dev.executor import CommandRunnerLike
     from diamond_dev.git_ops import GitOperations
     from diamond_dev.providers import GitHubWorkflowProvider
@@ -24,6 +31,34 @@ if TYPE_CHECKING:
         ImplementationContext,
         RunContext,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class LockfileInstall:
+    """One supported lockfile and its frozen install command."""
+
+    lockfile_name: str
+    command: Callable[[], tuple[str, ...]]
+    log_suffix: str
+
+
+LOCKFILE_INSTALLS: Final = (
+    LockfileInstall(
+        lockfile_name="uv.lock",
+        command=build_uv_sync_command,
+        log_suffix="uv-sync",
+    ),
+    LockfileInstall(
+        lockfile_name="pnpm-lock.yaml",
+        command=build_pnpm_install_command,
+        log_suffix="pnpm-install",
+    ),
+    LockfileInstall(
+        lockfile_name="Cargo.lock",
+        command=build_cargo_fetch_command,
+        log_suffix="cargo-fetch",
+    ),
+)
 
 
 class RepositoryPreparationMixin:
@@ -349,19 +384,14 @@ class RepositoryPreparationMixin:
 
     def _install_packages(self, repo_dir: Path, *, log_prefix: str) -> None:
         supported_lockfile_found = False
-        if (repo_dir / "uv.lock").is_file():
+        for lockfile_install in LOCKFILE_INSTALLS:
+            if not (repo_dir / lockfile_install.lockfile_name).is_file():
+                continue
             supported_lockfile_found = True
             self.runner.run(
-                build_uv_sync_command(),
+                lockfile_install.command(),
                 cwd=repo_dir,
-                log_name=f"{log_prefix}-uv-sync",
-            )
-        if (repo_dir / "pnpm-lock.yaml").is_file():
-            supported_lockfile_found = True
-            self.runner.run(
-                build_pnpm_install_command(),
-                cwd=repo_dir,
-                log_name=f"{log_prefix}-pnpm-install",
+                log_name=f"{log_prefix}-{lockfile_install.log_suffix}",
             )
         if not supported_lockfile_found:
             logger.info(

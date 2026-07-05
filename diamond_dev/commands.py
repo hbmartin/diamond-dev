@@ -151,6 +151,11 @@ def build_pnpm_install_command() -> tuple[str, ...]:
     return ("pnpm", "install", "--frozen-lockfile")
 
 
+def build_cargo_fetch_command() -> tuple[str, ...]:
+    """Build a locked cargo dependency fetch command."""
+    return ("cargo", "fetch", "--locked")
+
+
 def build_gh_pr_list_command(head_branch: str) -> tuple[str, ...]:
     """Build a deterministic GitHub PR lookup command for a workflow branch."""
     return (

@@ -575,7 +575,7 @@ def _install_calls(
     return [
         command_call
         for command_call in runner.command_calls
-        if command_call[0][0] in {"pnpm", "uv"}
+        if command_call[0][0] in {"cargo", "pnpm", "uv"}
     ]
 
 
@@ -1552,6 +1552,31 @@ def test_prepare_implementation_clones_installs_both_lockfiles_in_order(
             ("pnpm", "install", "--frozen-lockfile"),
             context.implementation.claude_dir,
             "claude-pnpm-install",
+        ),
+    ]
+
+
+def test_prepare_implementation_clones_installs_cargo_lockfiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, runner = _prepare_clones_for_lockfiles(
+        tmp_path,
+        monkeypatch,
+        codex_lockfiles=("Cargo.lock",),
+        claude_lockfiles=("Cargo.lock",),
+    )
+
+    assert _install_calls(runner) == [
+        (
+            ("cargo", "fetch", "--locked"),
+            context.implementation.codex_dir,
+            "codex-cargo-fetch",
+        ),
+        (
+            ("cargo", "fetch", "--locked"),
+            context.implementation.claude_dir,
+            "claude-cargo-fetch",
         ),
     ]
 
