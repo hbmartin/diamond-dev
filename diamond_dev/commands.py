@@ -84,6 +84,63 @@ def build_coderabbit_review_command(base_branch: str) -> tuple[str, ...]:
     return ("coderabbit", "review", "--plain", "--base", base_branch)
 
 
+def build_opencode_command(
+    prompt: str,
+    *,
+    model: str | None = None,
+) -> tuple[str, ...]:
+    """Build a non-interactive OpenCode run command."""
+    command = ["opencode", "run"]
+    if model is not None:
+        command.extend(("--model", model))
+    command.append(prompt)
+    return tuple(command)
+
+
+def build_cursor_agent_command(
+    prompt: str,
+    *,
+    model: str | None = None,
+) -> tuple[str, ...]:
+    """Build a non-interactive Cursor agent command with forced tool approval."""
+    command = ["cursor-agent"]
+    if model is not None:
+        command.extend(("--model", model))
+    command.extend(("-p", "--force", prompt))
+    return tuple(command)
+
+
+def build_copilot_command(
+    prompt: str,
+    *,
+    model: str | None = None,
+) -> tuple[str, ...]:
+    """Build a non-interactive GitHub Copilot CLI command with all tools allowed."""
+    command = ["copilot"]
+    if model is not None:
+        command.extend(("--model", model))
+    command.extend(("-p", prompt, "--allow-all-tools"))
+    return tuple(command)
+
+
+def build_qwen_command(prompt: str, *, model: str | None = None) -> tuple[str, ...]:
+    """Build a headless Qwen Code command with auto-approval."""
+    command = ["qwen"]
+    if model is not None:
+        command.extend(("-m", model))
+    command.extend(("-p", prompt, "-y"))
+    return tuple(command)
+
+
+def build_aider_command(prompt: str, *, model: str | None = None) -> tuple[str, ...]:
+    """Build a non-interactive Aider message command with auto-confirmation."""
+    command = ["aider"]
+    if model is not None:
+        command.extend(("--model", model))
+    command.extend(("--yes-always", "--message", prompt))
+    return tuple(command)
+
+
 def build_uv_sync_command() -> tuple[str, ...]:
     """Build a locked uv package install command."""
     return ("uv", "sync", "--locked")
