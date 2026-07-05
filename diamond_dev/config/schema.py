@@ -13,6 +13,7 @@ from diamond_dev.acceptance import (
 )
 from diamond_dev.agents import AgentCapability, adapter_names, resolve_adapter
 from diamond_dev.errors import ConfigError
+from diamond_dev.notify import DEFAULT_NOTIFICATION_FORMAT, NotificationFormat
 
 CONFIG_FILE_NAME: Final = ".diamond-dev.toml"
 DEFAULT_IMPLEMENTERS: Final = ("codex", "claude")
@@ -26,6 +27,7 @@ DEFAULT_COMPARISON_MAX_SIGNAL_OUTPUT_BYTES: Final = 20_000
 class NotificationConfig:
     """Best-effort notification webhook settings."""
 
+    format: NotificationFormat = DEFAULT_NOTIFICATION_FORMAT
     initial_implementation_url: str | None = None
     comparison_url: str | None = None
     comparison_implementation_url: str | None = None

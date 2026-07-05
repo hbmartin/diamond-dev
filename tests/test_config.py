@@ -458,3 +458,45 @@ def test_read_gemini_prompt_wraps_decode_failures(tmp_path: Path) -> None:
         read_gemini_prompt(load_config(tmp_path))
 
     assert isinstance(exc_info.value.__cause__, UnicodeDecodeError)
+
+
+def test_load_config_parses_notification_format(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[notifications]\n"
+        'format = "slack"\n'
+        'comparison_url = "https://hooks.slack.test/x"\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.notifications.format == "slack"
+    assert config.notifications.comparison_url == "https://hooks.slack.test/x"
+
+
+def test_load_config_rejects_unknown_notification_format(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[notifications]\n"
+        'format = "carrier-pigeon"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="notifications.format"):
+        load_config(tmp_path)
+
+
+def test_load_config_parses_comparison_signal_commands(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[comparison]\n"
+        'signal_commands = ["uv run lizard"]\n'
+        "max_signal_output_bytes = 512\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.comparison.signal_commands == ("uv run lizard",)
+    assert config.comparison.max_signal_output_bytes == 512

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from diamond_dev.acceptance import (
     DEFAULT_ACCEPTANCE_MAX_WAIT_SECONDS,
@@ -42,6 +42,11 @@ from diamond_dev.config.values import (
     validate_agent_names,
 )
 from diamond_dev.errors import ConfigError, DiamondDevError
+from diamond_dev.notify import (
+    DEFAULT_NOTIFICATION_FORMAT,
+    NOTIFICATION_FORMATS,
+    NotificationFormat,
+)
 
 _NOTIFICATION_ALIASES: Final = {
     "initial_implementation_url": TableLegacyAlias(
@@ -170,6 +175,7 @@ def _load_notifications(
 ) -> NotificationConfig:
     notifications = optional_table(raw_config, "notifications", config_path)
     return NotificationConfig(
+        format=_notification_format(notifications, config_path),
         initial_implementation_url=_notification_string(
             raw_config=raw_config,
             notifications=notifications,
@@ -201,6 +207,25 @@ def _load_notifications(
             config_path=config_path,
         ),
     )
+
+
+def _notification_format(
+    notifications: dict[str, Any],
+    config_path: Path,
+) -> NotificationFormat:
+    value = optional_string_with_label(
+        notifications,
+        "format",
+        "`notifications.format`",
+    )
+    if value is None:
+        return DEFAULT_NOTIFICATION_FORMAT
+    if value not in NOTIFICATION_FORMATS:
+        allowed = ", ".join(sorted(NOTIFICATION_FORMATS))
+        raise ConfigError(
+            f"Config {config_path} `notifications.format` must be one of: {allowed}",
+        )
+    return cast("NotificationFormat", value)
 
 
 def _notification_string(

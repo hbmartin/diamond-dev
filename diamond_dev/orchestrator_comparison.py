@@ -22,6 +22,7 @@ from diamond_dev.commit_pair import (
 from diamond_dev.comparison_bundle import write_comparison_bundle
 from diamond_dev.config import read_comparison_judgment_prompt, read_prompt_file
 from diamond_dev.errors import CommandFailureError, DiamondDevError
+from diamond_dev.naming import github_wiki_page_url
 from diamond_dev.notify import notify_url
 from diamond_dev.report import PhaseWarning
 from diamond_dev.workflow import (
@@ -105,10 +106,7 @@ class ComparisonPhasesMixin:
                 context.comparison_file.unlink()
             else:
                 self._promote_local_comparison(context)
-                notify_url(
-                    context.config.notifications.comparison_url,
-                    label="comparison",
-                )
+                _notify_comparison(context)
                 return context
 
         active_context = self._prepare_comparison_bundle(context)
@@ -147,10 +145,7 @@ class ComparisonPhasesMixin:
             )
 
         self._promote_local_comparison(active_context)
-        notify_url(
-            active_context.config.notifications.comparison_url,
-            label="comparison",
-        )
+        _notify_comparison(active_context)
         return active_context
 
     def _run_gemini_comparison(self, context: RunContext) -> RunContext:
@@ -315,6 +310,12 @@ class ComparisonPhasesMixin:
         notify_url(
             context.config.notifications.comparison_implementation_url,
             label="comparison implementation",
+            notification_format=context.config.notifications.format,
+            slug=context.plan.slug,
+            link=github_wiki_page_url(
+                context.wiki.url,
+                f"{context.plan.slug}-comparison",
+            ),
         )
         return context
 
@@ -326,3 +327,16 @@ class ComparisonPhasesMixin:
     ) -> RunContext:
         """Run the configured comparison fixer phase."""
         return self._run_comparison_fixer(context, selected, phase_warnings)
+
+
+def _notify_comparison(context: RunContext) -> None:
+    notify_url(
+        context.config.notifications.comparison_url,
+        label="comparison",
+        notification_format=context.config.notifications.format,
+        slug=context.plan.slug,
+        link=github_wiki_page_url(
+            context.wiki.url,
+            f"{context.plan.slug}-comparison",
+        ),
+    )

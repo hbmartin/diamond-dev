@@ -452,6 +452,8 @@ class DiamondDevOrchestrator(
                 notify_url(
                     context.config.notifications.initial_implementation_url,
                     label="initial implementation",
+                    notification_format=context.config.notifications.format,
+                    slug=context.plan.slug,
                 )
             return active_context
 
@@ -506,6 +508,8 @@ class DiamondDevOrchestrator(
         notify_url(
             context.config.notifications.initial_implementation_url,
             label="initial implementation",
+            notification_format=context.config.notifications.format,
+            slug=context.plan.slug,
         )
         return active_context
 

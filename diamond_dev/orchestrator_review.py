@@ -12,6 +12,7 @@ from diamond_dev.commands import review_fix_prompt, review_judgment_prompt
 from diamond_dev.config import read_prompt_file
 from diamond_dev.errors import CommandFailureError, DiamondDevError
 from diamond_dev.markdown import read_normalized_markdown
+from diamond_dev.naming import github_wiki_page_url
 from diamond_dev.notify import notify_url
 from diamond_dev.orchestrator_agents import agent_label, review_provider_command
 from diamond_dev.report import PhaseWarning
@@ -272,6 +273,12 @@ class ReviewPhasesMixin:
             notify_url(
                 context.config.notifications.review_input_needed_url,
                 label="review input needed",
+                notification_format=context.config.notifications.format,
+                slug=context.plan.slug,
+                link=github_wiki_page_url(
+                    context.wiki.url,
+                    f"{context.plan.slug}-review",
+                ),
             )
 
         copy_generated_child_file(
