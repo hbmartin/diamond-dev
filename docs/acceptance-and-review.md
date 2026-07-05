@@ -44,6 +44,7 @@ subjects), the base branch, and the diff byte budgets. Then one section per bran
 - Ahead/behind base: ahead=3, behind=0
 - Changed files: 4
 - Change stats: added=1, modified=3
+- Diff size: +120 / -34 lines
 
 ### Changed file list
 
@@ -53,6 +54,10 @@ subjects), the base branch, and the diff byte budgets. Then one section per bran
 ### Tests
 
 - tests: not_run
+
+### Signals
+
+- signals: not_run
 
 ### Capped diffs
 
@@ -72,12 +77,18 @@ Key behaviors:
   `max_total_diff_bytes`. Anything dropped is listed under explicit
   `Omitted changed files` / `### Omitted diff files` headings, so omissions are
   visible rather than silent.
+- **Diff size** sums insertions and deletions from `git diff --numstat`, with a
+  binary-file count when binaries changed.
 - **Tests.** With no `[comparison].test_commands`, each branch records
   `tests: not_run`. When set, each command runs with `sh -lc` in the branch's
   clone and the bundle records the command, `passed`/`failed` status with exit
   code, the log path, and clipped output (capped by `max_test_output_bytes`). A
   nonzero exit is recorded; the workflow still continues to judgment. Test
   commands that leave uncommitted files produce dirty-file records.
+- **Signals.** Same mechanics as tests, driven by `[comparison].signal_commands`
+  and capped by `max_signal_output_bytes`. Use them for objective judge inputs —
+  lint counts, complexity, coverage deltas — that are cheaper than a full test
+  run.
 
 These byte budgets are configurable — see
 [`[comparison]`](configuration.md#comparison--comparison-bundle).

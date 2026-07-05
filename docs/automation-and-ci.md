@@ -46,7 +46,8 @@ trailing newline, so it is safe to diff and to parse with any JSON tool.
   "preflight": { ... },             // null until preflight runs
   "phase_timings": [ ... ],
   "phase_warnings": [ ... ],
-  "command_logs": [ ... ]
+  "command_logs": [ ... ],
+  "command_timings": { ... }
 }
 ```
 
@@ -175,6 +176,25 @@ array if your pipeline must treat warnings as actionable.
   `command` array, `cwd`, and `log_path` under `logs/`. This is your index into
   the per-command logs.
 
+### `command_timings`
+
+Wall-clock accounting for every external command the run executed:
+
+```jsonc
+"command_timings": {
+  "total_seconds": 512.3,
+  "commands": [
+    { "label": "codex-initial-agent", "duration_seconds": 240.1, "returncode": 0 },
+    { "label": "claude-initial-agent", "duration_seconds": 198.7, "returncode": 0 }
+  ]
+}
+```
+
+Because agent invocations dominate a run's cost, summing per-label durations is
+a good latency (and rough spend) profile — e.g.
+`jq '[.command_timings.commands[] | select(.label | endswith("initial-agent"))]' logs/run.json`
+compares how long each implementer took.
+
 ### Consuming the report
 
 ```bash
@@ -195,12 +215,14 @@ jq -e '.phase_warnings | length == 0' logs/run.json >/dev/null \
 
 ## Notification webhooks
 
-`diamond-dev` fires best-effort HTTP GET requests at phase boundaries so an
+`diamond-dev` fires best-effort HTTP requests at phase boundaries so an
 external system can react without parsing logs. Configure them under
 `[notifications]`:
 
 ```toml
 [notifications]
+# format: "get" (default) | "json" | "slack" | "discord" | "ntfy"
+format                         = "slack"
 initial_implementation_url     = "https://example.test/initial"
 comparison_url                 = "https://example.test/comparison"
 comparison_implementation_url  = "https://example.test/followup"
@@ -218,18 +240,30 @@ open_pr_url                    = "https://example.test/open-pr"
 
 Semantics (from [`notify.py`](../diamond_dev/notify.py)):
 
-- **GET only, best-effort.** A 10-second timeout; any failure is logged at
-  `warning` and the workflow continues. A failed notification can produce a
-  `phase_warnings` entry but never fails the run.
+- **Best-effort.** A 10-second timeout; any failure is logged at `warning` and
+  the workflow continues. A failed notification can produce a `phase_warnings`
+  entry but never fails the run.
 - **`http`/`https` only.** Other schemes (and malformed URLs) are skipped with a
   warning — you cannot point these at arbitrary commands.
 - **Only phases completed by the current process notify.** On auto-resume, phases
   finished by an earlier process do not re-fire.
 
-These pair naturally with services like ntfy, a Slack/Discord incoming webhook
-proxy, or a small endpoint that records run progress. The most useful one to wire
-first is `comparison_url`, since the workflow pauses there for your human
-acceptance.
+### Notification formats
+
+`notifications.format` selects how every configured URL is called:
+
+| Format | Request |
+| --- | --- |
+| `get` (default) | Plain `GET`, no body — the original behavior. |
+| `json` | `POST` with `{"source": "diamond-dev", "event": "...", "slug": "...", "url": "...", "message": "..."}` |
+| `slack` | `POST` with `{"text": "diamond-dev <slug>: <event> — <link>"}` for Slack incoming webhooks. |
+| `discord` | `POST` with `{"content": "..."}` for Discord webhooks. |
+| `ntfy` | `POST` with a plain-text body and a `Title` header for [ntfy](https://ntfy.sh) topics. |
+
+Events include the run slug and, where one exists, a link — the GitHub wiki
+comparison/review page or the opened PR — so a Slack channel or ntfy topic can
+jump straight to the artifact. Point `comparison_url` at your channel first,
+since the workflow pauses there for your human acceptance.
 
 ## Driving acceptance unattended
 

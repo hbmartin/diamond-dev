@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Final, Literal, get_args
+from typing import Final, Literal, cast, get_args
 
 from loguru import logger
 
@@ -41,7 +41,9 @@ type AuthCommandBuilder = Callable[[str | None], tuple[str, ...]]
 
 PLUGIN_ENTRY_POINT_GROUP: Final = "diamond_dev.agents"
 _ADAPTER_NAME_PATTERN: Final = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_CAPABILITY_NAMES: Final = frozenset(get_args(AgentCapability.__value__))
+_CAPABILITY_NAMES: Final = frozenset(
+    get_args(AgentCapability.__value__),  # pylint: disable=no-member
+)
 _DOCTOR_GEMINI_PROMPT: Final = (
     "Diamond Dev doctor authentication check. Reply with exactly OK and do not "
     "use tools."
@@ -300,7 +302,7 @@ BUILTIN_AGENT_ADAPTERS: Mapping[str, AgentAdapter] = {
     ),
 }
 
-_plugin_adapter_cache: dict[str, AgentAdapter] | None = None
+_PLUGIN_ADAPTER_CACHE: dict[str, AgentAdapter] | None = None
 
 
 def adapter_names() -> frozenset[str]:
@@ -319,26 +321,26 @@ def resolve_adapter(adapter_name: str) -> AgentAdapter:
 
 def plugin_adapters() -> Mapping[str, AgentAdapter]:
     """Return adapters registered via `diamond_dev.agents` entry points."""
-    global _plugin_adapter_cache  # noqa: PLW0603 # pylint: disable=global-statement
-    if _plugin_adapter_cache is None:
-        _plugin_adapter_cache = _load_plugin_adapters()
-    return _plugin_adapter_cache
+    global _PLUGIN_ADAPTER_CACHE  # noqa: PLW0603 # pylint: disable=global-statement
+    if _PLUGIN_ADAPTER_CACHE is None:
+        _PLUGIN_ADAPTER_CACHE = _load_plugin_adapters()
+    return _PLUGIN_ADAPTER_CACHE
 
 
 def clear_plugin_adapter_cache() -> None:
     """Forget loaded plugin adapters so the next lookup reloads entry points."""
-    global _plugin_adapter_cache  # noqa: PLW0603 # pylint: disable=global-statement
-    _plugin_adapter_cache = None
+    global _PLUGIN_ADAPTER_CACHE  # noqa: PLW0603 # pylint: disable=global-statement
+    _PLUGIN_ADAPTER_CACHE = None
 
 
 def _load_plugin_adapters() -> dict[str, AgentAdapter]:
     adapters: dict[str, AgentAdapter] = {}
     for entry_point in metadata.entry_points(group=PLUGIN_ENTRY_POINT_GROUP):
-        # pylint: disable-next=broad-exception-caught
         try:
             loaded = entry_point.load()
             for adapter in _adapters_from_entry_point(loaded):
                 _register_plugin_adapter(adapters, adapter, entry_point.name)
+        # pylint: disable-next=broad-exception-caught
         except (Exception,) as error:  # noqa: BLE001
             logger.warning(
                 "Skipping agent adapter plugin `{}`: {}",
@@ -349,14 +351,14 @@ def _load_plugin_adapters() -> dict[str, AgentAdapter]:
 
 
 def _adapters_from_entry_point(loaded: object) -> tuple[AgentAdapter, ...]:
-    if callable(loaded) and not isinstance(loaded, AgentAdapter):
-        loaded = loaded()
+    if isinstance(loaded, Callable) and not isinstance(loaded, AgentAdapter):
+        loaded = cast("Callable[[], object]", loaded)()
     if isinstance(loaded, AgentAdapter):
         return (loaded,)
     if isinstance(loaded, Iterable) and not isinstance(loaded, str | bytes):
         candidates = tuple(loaded)
         if all(isinstance(candidate, AgentAdapter) for candidate in candidates):
-            return candidates
+            return cast("tuple[AgentAdapter, ...]", candidates)
     raise DiamondDevError(
         "Plugin entry point must provide an AgentAdapter, an iterable of "
         "AgentAdapter, or a callable returning either",

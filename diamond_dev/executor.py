@@ -343,7 +343,7 @@ class CommandRunner:
             raise _command_failure(result)
         return result
 
-    def _run_streaming(
+    def _run_streaming(  # pylint: disable=too-many-locals
         self,
         command: tuple[str, ...],
         *,

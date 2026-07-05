@@ -11,7 +11,9 @@ from loguru import logger
 
 type NotificationFormat = Literal["get", "json", "slack", "discord", "ntfy"]
 
-NOTIFICATION_FORMATS: Final = frozenset(get_args(NotificationFormat.__value__))
+NOTIFICATION_FORMATS: Final = frozenset(
+    get_args(NotificationFormat.__value__),  # pylint: disable=no-member
+)
 DEFAULT_NOTIFICATION_FORMAT: Final = "get"
 _ALLOWED_NOTIFICATION_SCHEMES: Final = frozenset({"http", "https"})
 

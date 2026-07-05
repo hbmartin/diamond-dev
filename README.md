@@ -86,6 +86,7 @@ flowchart TD
   root lockfiles:
   - `uv` — for `uv.lock` (`uv sync --locked`)
   - `pnpm` — for `pnpm-lock.yaml` (`pnpm install --frozen-lockfile`)
+  - `cargo` — for `Cargo.lock` (`cargo fetch --locked`)
 
 Before cloning or launching agents, `diamond-dev` runs doctor-grade preflight
 checks that verify the configured commands are available on `PATH`, GitHub auth
@@ -188,7 +189,14 @@ Useful flags:
 - `--config PATH`: Load configuration from a specific TOML file instead of
   `.diamond-dev.toml` in the current directory. Relative paths resolve from the
   invocation directory. With `init`, this selects the config file to write.
-- `--force`: With `init`, overwrite an existing config file without asking.
+- `--force`: With `init`, overwrite an existing config file without asking. With
+  `clean`, skip the clone-safety checks.
+- `--dry-run`: With a plan, resolve and log the run plan — slug, clones,
+  branches, roles, required CLIs — without cloning or launching agents.
+- `--tui`: Render a live phase-progress table while a workflow runs (requires
+  the optional [Rich](https://github.com/Textualize/rich) dependency:
+  `pip install rich`). Console logs drop to warnings while the table renders;
+  file logs are unaffected.
 - `--version`: Show the installed `diamond-dev` version.
 
 To run readiness checks without starting a workflow:
@@ -198,10 +206,24 @@ diamond-dev doctor
 diamond-dev --config custom.toml doctor
 ```
 
-`doctor` runs the same startup checks used by workflow preflight. Codex, Claude,
-and CodeRabbit use their auth status commands. Gemini does not expose a status
-command, so `doctor` sends a tiny headless prompt to validate Gemini auth before
-long-running agents start.
+`doctor` runs the same startup checks used by workflow preflight. Each agent
+adapter that declares an auth probe is checked (Codex, Claude, and CodeRabbit
+use their auth status commands; Gemini answers a tiny headless prompt); adapters
+without a probe are skipped with a log line.
+
+To validate the config file, inspect a run, or clean up a run's generated
+clones:
+
+```bash
+diamond-dev validate               # load + validate .diamond-dev.toml
+diamond-dev status my-plan.md      # clones, branches, wiki artifacts, acceptance
+diamond-dev clean my-plan.md       # remove generated clones and local artifacts
+```
+
+`status` and `clean` accept a plan path or a raw slug and never touch the wiki
+clone or remote branches; `clean` refuses to delete a directory whose Git origin
+does not match the configured repository unless you pass `--force`. See
+[Repositories & auto-resume](docs/repositories-and-resume.md).
 
 ## Configuration
 
@@ -220,9 +242,13 @@ SCP-like form such as `git@github.com:owner/repo.git`. With only this key,
 settings.
 
 Everything else is optional and has a default. For the complete set of tables and
-keys — `[workflow]`, `[agents.*]`, `[comparison]`, `[acceptance]`,
-`[notifications]`, `[prompts]`, and legacy/migration notes — see the
+keys — `[workflow]` (including best-of-N implementer line-ups), `[agents.*]`
+(nine built-in adapters plus entry-point plugins), `[comparison]` (test and
+signal commands), `[acceptance]`, `[notifications]` (GET/JSON/Slack/Discord/ntfy
+formats), `[prompts]`, and legacy/migration notes — see the
 [Configuration reference](docs/configuration.md).
+[`docs/diamond-dev.schema.json`](docs/diamond-dev.schema.json) is a JSON Schema
+for the file, and `diamond-dev validate` checks it from the command line.
 
 ## Documentation
 
@@ -254,11 +280,12 @@ repositories and plans you trust**:
   and `gemini -p … --skip-trust -y`. The agents can read and write files and run
   commands in their clones without prompting.
 - **Package install runs repository lifecycle scripts.** When a clone contains
-  `uv.lock` or `pnpm-lock.yaml`, `diamond-dev` runs the matching install command,
-  which can execute dependency lifecycle scripts defined by the target
-  repository.
-- **Comparison test commands are trusted and run via `sh -lc`.** Any
-  `[comparison].test_commands` you configure run in each implementation clone.
+  `uv.lock`, `pnpm-lock.yaml`, or `Cargo.lock`, `diamond-dev` runs the matching
+  install command, which can execute dependency lifecycle scripts defined by the
+  target repository.
+- **Comparison test and signal commands are trusted and run via `sh -lc`.** Any
+  `[comparison].test_commands` or `[comparison].signal_commands` you configure
+  run in each implementation clone.
 - **Logs may contain secrets.** Loguru exception logs include local variable
   values by default. Set `DIAMOND_DEV_LOG_DIAGNOSE=0` (or `false`/`no`/`off`) to
   disable this if your logs may capture sensitive values. See

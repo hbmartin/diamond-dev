@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from diamond_dev.config.loader import (
     load_config,
+    resolve_config_path,
+)
+from diamond_dev.config.prompt_files import (
     read_comparison_judgment_prompt,
     read_gemini_prompt,
     read_prompt_file,
-    resolve_config_path,
 )
 from diamond_dev.config.schema import (
     CONFIG_FILE_NAME,

@@ -68,6 +68,8 @@ class RunReportWorkflow:
 class RunReport:
     """Inputs for writing a structured run report."""
 
+    # pylint: disable=too-many-instance-attributes
+
     path: Path
     status: RunStatus
     timing: RunReportTiming
