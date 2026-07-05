@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ class CommandResult:
     returncode: int
     log_path: Path
     output: str
+    duration_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +37,15 @@ class CommandLogRecord:
     command: tuple[str, ...]
     cwd: Path
     log_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class CommandTimingRecord:
+    """Wall-clock accounting for one completed command."""
+
+    label: str
+    duration_seconds: float
+    returncode: int
 
 
 class StartedCommand(Protocol):
@@ -123,6 +134,7 @@ class ProcessMetadata:
     cwd: Path
     label: str
     log_path: Path
+    started_monotonic: float = 0.0
 
 
 @dataclass(slots=True)
@@ -141,6 +153,7 @@ class ManagedProcess:
 
     metadata: ProcessMetadata
     resources: ProcessResources
+    on_complete: Callable[[CommandResult], None] | None = None
 
     def wait(self) -> CommandResult:
         """Wait for the process to exit and return its result."""
@@ -155,7 +168,12 @@ class ManagedProcess:
             returncode=returncode,
             log_path=self.metadata.log_path,
             output="",
+            duration_seconds=(
+                time.perf_counter() - self.metadata.started_monotonic
+            ),
         )
+        if self.on_complete is not None:
+            self.on_complete(result)
         if returncode != 0:
             raise _command_failure(result)
         return result
@@ -168,6 +186,7 @@ class CommandRunner:
         """Create a command runner using a log directory."""
         self.log_dir = log_dir
         self.command_logs: list[CommandLogRecord] = []
+        self.command_timings: list[CommandTimingRecord] = []
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def run(
@@ -221,6 +240,7 @@ class CommandRunner:
             cwd=cwd,
             log_path=log_path,
         )
+        started_monotonic = time.perf_counter()
         log_file = log_path.open("w", encoding="utf-8")
         logger.info("Starting {}: {}", log_name, shlex.join(command_tuple))
         try:
@@ -263,6 +283,7 @@ class CommandRunner:
                 cwd=cwd,
                 label=log_name,
                 log_path=log_path,
+                started_monotonic=started_monotonic,
             ),
             resources=ProcessResources(
                 process=process,
@@ -270,6 +291,7 @@ class CommandRunner:
                 log_file=log_file,
                 output_thread=output_thread,
             ),
+            on_complete=self._record_command_timing,
         )
 
     def run_interactive(
@@ -290,6 +312,7 @@ class CommandRunner:
             log_path=log_path,
         )
         logger.info("Starting interactive {}: {}", log_name, shlex.join(command_tuple))
+        started_monotonic = time.perf_counter()
         with log_path.open("w", encoding="utf-8") as log_file:
             log_file.write(f"$ {shlex.join(command_tuple)}\n")
             try:
@@ -313,7 +336,9 @@ class CommandRunner:
             returncode=completed.returncode,
             log_path=log_path,
             output="",
+            duration_seconds=time.perf_counter() - started_monotonic,
         )
+        self._record_command_timing(result)
         if check and completed.returncode != 0:
             raise _command_failure(result)
         return result
@@ -335,6 +360,7 @@ class CommandRunner:
             log_path=log_path,
         )
         logger.info("Running {}: {}", log_name, shlex.join(command))
+        started_monotonic = time.perf_counter()
         captured_output: list[str] | None = [] if output_path is None else None
 
         with ExitStack() as stack:
@@ -387,7 +413,9 @@ class CommandRunner:
             returncode=returncode,
             log_path=log_path,
             output="".join(captured_output) if captured_output is not None else "",
+            duration_seconds=time.perf_counter() - started_monotonic,
         )
+        self._record_command_timing(result)
         if check and returncode != 0:
             raise _command_failure(result)
         return result
@@ -410,6 +438,15 @@ class CommandRunner:
                 command=command,
                 cwd=cwd,
                 log_path=log_path,
+            ),
+        )
+
+    def _record_command_timing(self, result: CommandResult) -> None:
+        self.command_timings.append(
+            CommandTimingRecord(
+                label=result.log_path.stem,
+                duration_seconds=result.duration_seconds,
+                returncode=result.returncode,
             ),
         )
 

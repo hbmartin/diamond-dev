@@ -31,6 +31,11 @@ def test_orchestrator_e2e_happy_path_with_fake_clis(
 
     summary = json.loads((tmp_path / "logs" / "run.json").read_text())
     assert summary["status"] == "succeeded"
+    assert summary["command_timings"]["total_seconds"] > 0
+    assert any(
+        timing["label"].endswith("initial-agent")
+        for timing in summary["command_timings"]["commands"]
+    )
     assert summary["selected_implementation"]["accepted_agent"] == "codex"
     assert summary["context"]["artifacts"]["pr_url"] == (
         "https://github.com/owner/repo/pull/123"

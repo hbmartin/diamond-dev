@@ -35,6 +35,7 @@ from diamond_dev.executor import (
     CommandResult,
     CommandRunner,
     CommandRunnerLike,
+    CommandTimingRecord,
     StartedCommand,
 )
 from diamond_dev.git_ops import GitOperations
@@ -371,6 +372,7 @@ class DiamondDevOrchestrator(
                     command_logs=_command_log_records(self.runner),
                     phase_warnings=run_state.phase_warnings,
                     error=run_state.error,
+                    command_timings=_command_timing_records(self.runner),
                 ),
             )
 
@@ -632,6 +634,17 @@ def _command_log_records(runner: object) -> tuple[CommandLogRecord, ...]:
         command_log
         for command_log in command_logs
         if isinstance(command_log, CommandLogRecord)
+    )
+
+
+def _command_timing_records(runner: object) -> tuple[CommandTimingRecord, ...]:
+    command_timings = getattr(runner, "command_timings", ())
+    if not isinstance(command_timings, list | tuple):
+        return ()
+    return tuple(
+        command_timing
+        for command_timing in command_timings
+        if isinstance(command_timing, CommandTimingRecord)
     )
 
 
