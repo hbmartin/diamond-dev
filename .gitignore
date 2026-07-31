@@ -42,3 +42,6 @@ triage_decisions.db
 reviews_triage/
 logs/
 .env
+
+# MkDocs build output
+site/

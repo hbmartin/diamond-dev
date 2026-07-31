@@ -71,6 +71,11 @@ def agent_label(agent_name: str) -> str:
         "claude": "Claude",
         "coderabbit": "CodeRabbit",
         "gemini": "Gemini",
+        "opencode": "OpenCode",
+        "cursor-agent": "Cursor",
+        "copilot": "Copilot",
+        "qwen": "Qwen",
+        "aider": "Aider",
     }.get(agent_name, agent_name)
 
 

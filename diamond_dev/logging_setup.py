@@ -51,9 +51,14 @@ def configure_logging(
     log_file: Path | None = None,
     json_log_file: Path | None = None,
     log_level: str | None = None,
+    console_level: str | None = None,
     diagnose: bool | None = None,
 ) -> Path:
-    """Configure Loguru console, text file, and JSONL file logging."""
+    """Configure Loguru console, text file, and JSONL file logging.
+
+    `console_level` raises the stderr sink threshold independently of the
+    file sinks, e.g. to keep the terminal quiet while a TUI is rendering.
+    """
     selected_log_file = log_file or Path(
         os.environ.get("DIAMOND_DEV_LOG_FILE", str(DEFAULT_LOG_FILE)),
     )
@@ -63,6 +68,7 @@ def configure_logging(
     selected_log_level = (
         log_level or os.environ.get("DIAMOND_DEV_LOG_LEVEL", DEFAULT_LOG_LEVEL)
     ).upper()
+    selected_console_level = (console_level or selected_log_level).upper()
     selected_diagnose = (
         diagnose
         if diagnose is not None
@@ -78,7 +84,7 @@ def configure_logging(
     setattr(warnings, "showwarning", showwarning)  # noqa: B010
     logger.add(
         sys.stderr,
-        level=selected_log_level,
+        level=selected_console_level,
         format=CONSOLE_LOG_FORMAT,
         backtrace=True,
         diagnose=selected_diagnose,

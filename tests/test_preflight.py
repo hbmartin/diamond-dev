@@ -8,7 +8,7 @@ from typing import Self
 
 import pytest
 
-from diamond_dev import preflight
+from diamond_dev import agents, preflight
 from diamond_dev.config import DiamondDevConfig
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.executor import (
@@ -108,7 +108,7 @@ def test_run_preflight_runs_doctor_checks(
         (
             "gemini",
             "-p",
-            preflight._DOCTOR_GEMINI_PROMPT,  # noqa: SLF001
+            agents._DOCTOR_GEMINI_PROMPT,  # noqa: SLF001
             "--skip-trust",
         ),
         ("coderabbit", "auth", "status", "--agent"),

@@ -33,11 +33,29 @@ checks that clone root for package lockfiles:
 
 - `uv.lock` → `uv sync --locked`
 - `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`
+- `Cargo.lock` → `cargo fetch --locked`
 
-Repositories with both lockfiles run both commands in that order in each clone;
-repositories with neither skip package install. These install commands can execute
+Repositories with several lockfiles run each matching command in that order in
+each clone; repositories with none skip package install. These install commands can execute
 dependency lifecycle scripts from the target repository, so run `diamond-dev` only
 against repositories you trust (see [README Security](../README.md#security)).
+
+## Inspecting and cleaning runs
+
+Two subcommands operate on this generated state without running a workflow:
+
+- `diamond-dev status <plan-or-slug>` reports each implementer clone (present or
+  missing, current branch, dirty-file count), the wiki clone and its
+  comparison/bundle/review artifacts, the acceptance state, and the last
+  `logs/run.json` status.
+- `diamond-dev clean <plan-or-slug>` deletes the generated implementation clones
+  and the local comparison bundle. It refuses to remove a directory that is not
+  a Git clone of the configured `repository_url` unless you pass `--force`, and
+  it never touches the wiki clone or remote branches. `comparison.md` is shared
+  across runs and is only removed with `--force`.
+
+Both accept a markdown plan path or a raw slug, so they work after the plan file
+is gone.
 
 ## Auto-resume model
 

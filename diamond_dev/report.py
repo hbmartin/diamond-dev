@@ -14,7 +14,7 @@ from loguru import logger
 from diamond_dev.review_judgments import read_review_judgments_status
 
 if TYPE_CHECKING:
-    from diamond_dev.executor import CommandLogRecord
+    from diamond_dev.executor import CommandLogRecord, CommandTimingRecord
     from diamond_dev.preflight import PreflightSummary
     from diamond_dev.workflow import RunContext, SelectedImplementation
 
@@ -68,6 +68,8 @@ class RunReportWorkflow:
 class RunReport:
     """Inputs for writing a structured run report."""
 
+    # pylint: disable=too-many-instance-attributes
+
     path: Path
     status: RunStatus
     timing: RunReportTiming
@@ -75,6 +77,7 @@ class RunReport:
     command_logs: Sequence[CommandLogRecord]
     phase_warnings: Sequence[PhaseWarning]
     error: str | None
+    command_timings: Sequence[CommandTimingRecord] = ()
 
 
 def write_run_report(report: RunReport) -> None:
@@ -91,6 +94,7 @@ def write_run_report(report: RunReport) -> None:
         "phase_timings": _phase_timings_payload(report.timing.phase_timings),
         "phase_warnings": _phase_warnings_payload(report.phase_warnings),
         "command_logs": _command_logs_payload(report.command_logs),
+        "command_timings": _command_timings_payload(report.command_timings),
     }
     _write_json_payload(report.path, payload)
     logger.info("Wrote run report: {}", report.path)
@@ -285,6 +289,25 @@ def _phase_warnings_payload(
         }
         for phase_warning in phase_warnings
     ]
+
+
+def _command_timings_payload(
+    command_timings: Sequence[CommandTimingRecord],
+) -> dict[str, object]:
+    return {
+        "total_seconds": round(
+            sum(timing.duration_seconds for timing in command_timings),
+            3,
+        ),
+        "commands": [
+            {
+                "label": timing.label,
+                "duration_seconds": round(timing.duration_seconds, 3),
+                "returncode": timing.returncode,
+            }
+            for timing in command_timings
+        ],
+    }
 
 
 def _command_logs_payload(

@@ -186,3 +186,107 @@ def test_main_returns_interrupt_exit_code(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(main_module, "DiamondDevOrchestrator", FakeOrchestrator)
 
     assert main_module.main(["plan.md"]) == 130
+
+
+def test_parse_args_accepts_validate_command() -> None:
+    args = main_module.parse_args(["validate"])
+
+    assert args.command == "validate"
+    assert args.plan_path is None
+
+
+def test_parse_args_accepts_status_and_clean_targets() -> None:
+    status_args = main_module.parse_args(["status", "My Plan.md"])
+    clean_args = main_module.parse_args(["clean", "my-plan", "--force"])
+
+    assert status_args.command == "status"
+    assert status_args.target == "My Plan.md"
+    assert clean_args.command == "clean"
+    assert clean_args.target == "my-plan"
+    assert clean_args.force
+
+
+def test_parse_args_rejects_status_without_target() -> None:
+    with pytest.raises(SystemExit):
+        main_module.parse_args(["status"])
+
+
+def test_parse_args_accepts_dry_run_for_plans_only() -> None:
+    args = main_module.parse_args(["--dry-run", "plan.md"])
+
+    assert args.command == "run"
+    assert args.dry_run
+
+    with pytest.raises(SystemExit):
+        main_module.parse_args(["--dry-run", "doctor"])
+
+
+def test_parse_args_rejects_tui_for_utility_commands() -> None:
+    args = main_module.parse_args(["--tui", "plan.md"])
+
+    assert args.tui
+
+    with pytest.raises(SystemExit):
+        main_module.parse_args(["--tui", "validate"])
+
+
+def test_main_dispatches_validate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validated: list[tuple[Path, Path | None]] = []
+
+    def fake_run_validate(cwd: Path, config_path: Path | None = None) -> int:
+        validated.append((cwd, config_path))
+        return 0
+
+    monkeypatch.setattr(main_module, "run_validate", fake_run_validate)
+    monkeypatch.chdir(tmp_path)
+
+    assert main_module.main(["validate"]) == 0
+    assert validated == [(tmp_path, None)]
+
+
+def test_main_dispatches_status_and_clean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, bool | None]] = []
+
+    def fake_run_status(*, cwd, runner, plan_or_slug, config_path=None):
+        del cwd, runner, config_path
+        calls.append(("status", plan_or_slug, None))
+
+    def fake_run_clean(*, cwd, runner, plan_or_slug, config_path=None, force=False):
+        del cwd, runner, config_path
+        calls.append(("clean", plan_or_slug, force))
+        return ()
+
+    monkeypatch.setattr(main_module, "run_status", fake_run_status)
+    monkeypatch.setattr(main_module, "run_clean", fake_run_clean)
+    monkeypatch.chdir(tmp_path)
+
+    assert main_module.main(["status", "my-plan"]) == 0
+    assert main_module.main(["clean", "my-plan", "--force"]) == 0
+    assert calls == [
+        ("status", "my-plan", None),
+        ("clean", "my-plan", True),
+    ]
+
+
+def test_main_dispatches_dry_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dry_runs: list[Path] = []
+
+    def fake_run_dry_run(*, cwd, plan_path, config_path=None) -> int:
+        del cwd, config_path
+        dry_runs.append(plan_path)
+        return 0
+
+    monkeypatch.setattr(main_module, "run_dry_run", fake_run_dry_run)
+    monkeypatch.chdir(tmp_path)
+
+    assert main_module.main(["--dry-run", "plan.md"]) == 0
+    assert dry_runs == [Path("plan.md")]

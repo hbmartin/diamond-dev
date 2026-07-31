@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from diamond_dev import naming
 from diamond_dev.errors import UrlDerivationError
 from diamond_dev.naming import (
     derive_wiki_repository_url,
@@ -111,3 +112,22 @@ def test_derive_wiki_repository_url_rejects_non_github_remote() -> None:
 def test_derive_wiki_repository_url_rejects_extra_github_path() -> None:
     with pytest.raises(UrlDerivationError):
         derive_wiki_repository_url("https://github.com/owner/repo/issues")
+
+
+def test_github_wiki_page_url_from_scp_and_https_urls() -> None:
+    assert naming.github_wiki_page_url(
+        "git@github.com:owner/repo.wiki.git",
+        "my-plan-comparison",
+    ) == "https://github.com/owner/repo/wiki/my-plan-comparison"
+    assert naming.github_wiki_page_url(
+        "https://github.com/owner/repo.wiki.git",
+        "my-plan-review",
+    ) == "https://github.com/owner/repo/wiki/my-plan-review"
+
+
+def test_github_wiki_page_url_returns_none_for_non_github_remotes() -> None:
+    assert naming.github_wiki_page_url(
+        "https://gitlab.com/owner/repo.wiki.git",
+        "page",
+    ) is None
+    assert naming.github_wiki_page_url("file:///srv/repo.wiki.git", "page") is None

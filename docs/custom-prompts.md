@@ -64,7 +64,7 @@ the workflow appends the `Required context:` block after whatever you write.
 
 If a configured prompt file is missing or unreadable at startup, the run fails
 with a clear config error (see `read_prompt_file` in
-[`config.py`](../diamond_dev/config.py)) — overrides are validated eagerly, not
+[`config/loader.py`](../diamond_dev/config/loader.py)) — overrides are validated eagerly, not
 silently ignored.
 
 ## The prompts, phase by phase
