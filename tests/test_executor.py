@@ -114,3 +114,32 @@ def test_run_interactive_wraps_launch_failures(tmp_path: Path) -> None:
             cwd=tmp_path,
             log_name="missing-command",
         )
+
+
+def test_runner_records_command_timings(tmp_path: Path) -> None:
+    runner = CommandRunner(tmp_path / "logs")
+
+    result = runner.run(
+        ("sh", "-c", "echo timed"),
+        cwd=tmp_path,
+        log_name="timing-check",
+    )
+
+    assert result.duration_seconds > 0
+    assert [timing.label for timing in runner.command_timings] == ["timing-check"]
+    assert runner.command_timings[0].returncode == 0
+    assert runner.command_timings[0].duration_seconds == result.duration_seconds
+
+
+def test_started_command_records_timing_on_wait(tmp_path: Path) -> None:
+    runner = CommandRunner(tmp_path / "logs")
+
+    started = runner.start(
+        ("sh", "-c", "echo background"),
+        cwd=tmp_path,
+        log_name="timing-start",
+    )
+    result = started.wait()
+
+    assert result.duration_seconds > 0
+    assert [timing.label for timing in runner.command_timings] == ["timing-start"]

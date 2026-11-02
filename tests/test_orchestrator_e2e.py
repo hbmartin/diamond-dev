@@ -31,6 +31,11 @@ def test_orchestrator_e2e_happy_path_with_fake_clis(
 
     summary = json.loads((tmp_path / "logs" / "run.json").read_text())
     assert summary["status"] == "succeeded"
+    assert summary["command_timings"]["total_seconds"] > 0
+    assert any(
+        timing["label"].endswith("initial-agent")
+        for timing in summary["command_timings"]["commands"]
+    )
     assert summary["selected_implementation"]["accepted_agent"] == "codex"
     assert summary["context"]["artifacts"]["pr_url"] == (
         "https://github.com/owner/repo/pull/123"
@@ -70,6 +75,7 @@ def _prepare_e2e_workspace(
     monkeypatch: pytest.MonkeyPatch,
     *,
     comparison_markdown: str | None = None,
+    config_extra: str = "",
 ) -> tuple[Path, Path]:
     setup_runner = CommandRunner(tmp_path / "setup-logs")
     fake_bin = tmp_path / "fake-bin"
@@ -97,7 +103,8 @@ def _prepare_e2e_workspace(
     plan_path.write_text("# My Plan\n", encoding="utf-8")
     (tmp_path / ".diamond-dev.toml").write_text(
         f'repository_url = "{origin.as_uri()}"\n'
-        f'wiki_repository_url = "{wiki_origin.as_uri()}"\n',
+        f'wiki_repository_url = "{wiki_origin.as_uri()}"\n'
+        f"{config_extra}",
         encoding="utf-8",
     )
     return plan_path, calls_file
@@ -202,7 +209,7 @@ def _write_fake_clis(fake_bin: Path) -> None:
     _write_executable(
         fake_bin / "gh",
         """#!/bin/sh
-_fake_record gh
+_fake_record gh "$@"
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   exit 0
 fi
@@ -225,12 +232,12 @@ exit 1
         """#!/bin/sh
 case "$*" in
   *"Diamond Dev doctor authentication check"*)
-    _fake_record gemini-auth
+    _fake_record gemini-auth "$@"
     printf 'OK\\n'
     exit 0
     ;;
 esac
-_fake_record gemini
+_fake_record gemini "$@"
 cat > comparison.md <<'EOF'
 Fake comparison
 - [x] Accept: codex
@@ -241,11 +248,11 @@ EOF
         fake_bin / "coderabbit",
         """#!/bin/sh
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  _fake_record coderabbit-auth
+  _fake_record coderabbit-auth "$@"
   printf '{"authenticated":true}\\n'
   exit 0
 fi
-_fake_record coderabbit
+_fake_record coderabbit "$@"
 printf 'Review\\n(A) Fix accepted item.\\n'
 """,
     )
@@ -253,11 +260,11 @@ printf 'Review\\n(A) Fix accepted item.\\n'
         fake_bin / "codex",
         """#!/bin/sh
 if [ "$1" = "login" ] && [ "$2" = "status" ]; then
-  _fake_record codex-auth
+  _fake_record codex-auth "$@"
   printf 'Logged in\\n'
   exit 0
 fi
-_fake_record codex
+_fake_record codex "$@"
 repo=
 previous=
 for arg in "$@"; do
@@ -312,11 +319,11 @@ esac
         fake_bin / "claude",
         """#!/bin/sh
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  _fake_record claude-auth
+  _fake_record claude-auth "$@"
   printf 'Authenticated\\n'
   exit 0
 fi
-_fake_record claude
+_fake_record claude "$@"
 case "$*" in
   *"/review "*)
     exit 0
@@ -343,8 +350,11 @@ esac
 def _write_fake_support(fake_bin: Path) -> None:
     support_script = """#!/bin/sh
 _fake_record() {
+  name="$1"
+  shift
   if [ -n "$FAKE_CLI_CALLS" ]; then
-    printf '%s\\n' "$1" >> "$FAKE_CLI_CALLS"
+    printf '%s\\n' "$name" >> "$FAKE_CLI_CALLS"
+    printf '%s\\n' "$name $*" >> "${FAKE_CLI_CALLS}.argv"
   fi
 }
 _fake_git_user() {
@@ -368,3 +378,50 @@ _fake_git_user() {
 def _write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
+
+
+def test_orchestrator_e2e_three_way_self_competition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path, calls_file = _prepare_e2e_workspace(
+        tmp_path,
+        monkeypatch,
+        config_extra=(
+            "[workflow]\n"
+            'implementers = ["codex", "claude", "claude-b"]\n'
+            "[agents.claude-b]\n"
+            'adapter = "claude"\n'
+        ),
+    )
+    runner = CommandRunner(tmp_path / "logs")
+    orchestrator = DiamondDevOrchestrator(
+        cwd=tmp_path,
+        runner=runner,
+        sleep=lambda _seconds: None,
+    )
+
+    assert orchestrator.run(plan_path) == 0
+
+    summary = json.loads((tmp_path / "logs" / "run.json").read_text())
+    assert summary["status"] == "succeeded"
+    assert summary["context"]["branches"]["claude-b"] == "claude-b/my-plan"
+    assert summary["context"]["workflow_roles"]["implementers"] == [
+        "codex",
+        "claude",
+        "claude-b",
+    ]
+    assert summary["selected_implementation"]["accepted_agent"] == "codex"
+    # The self-competing agent got its own clone and pushed its own branch.
+    assert (tmp_path / "claude-b-my-plan" / "claude.txt").is_file()
+    calls = calls_file.read_text(encoding="utf-8").splitlines()
+    # The claude executable implemented two branches and fixed the winner.
+    assert calls.count("claude") >= 3
+    # Full argv replay log captures the exact agent invocations.
+    argv_lines = (
+        Path(f"{calls_file}.argv").read_text(encoding="utf-8").splitlines()
+    )
+    assert any(
+        "--dangerously-bypass-approvals-and-sandbox" in line for line in argv_lines
+    )
+    assert any("--dangerously-skip-permissions" in line for line in argv_lines)

@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from diamond_dev import commit_pair as commit_pair_module
 from diamond_dev import logging_setup
 from diamond_dev import main as main_module
 from diamond_dev import pr as pr_module
@@ -19,6 +18,8 @@ from diamond_dev.commit_pair import (
     infer_commit_labels,
     upsert_commit_pair_index,
 )
+from diamond_dev.commit_pair import records as commit_pair_records
+from diamond_dev.commit_pair import resolve as commit_pair_resolve
 from diamond_dev.errors import CommandFailureError, DiamondDevError, UrlDerivationError
 from diamond_dev.executor import CommandResult
 from diamond_dev.git_ops import ComparisonGitOperations, GitHubGitOperations
@@ -319,7 +320,7 @@ def test_commit_pair_ref_helpers_return_empty_on_command_failure(
     runner = _StaticRunner(returncode=1)
 
     assert (
-        commit_pair_module._containing_ref_names(  # noqa: SLF001
+        commit_pair_resolve._containing_ref_names(  # noqa: SLF001
             runner,
             tmp_path,
             "a" * 40,
@@ -328,7 +329,7 @@ def test_commit_pair_ref_helpers_return_empty_on_command_failure(
         == ()
     )
     assert (
-        commit_pair_module._local_ref_names(  # noqa: SLF001
+        commit_pair_resolve._local_ref_names(  # noqa: SLF001
             cwd=tmp_path,
             runner=runner,
             sha="a" * 40,
@@ -341,7 +342,7 @@ def test_commit_pair_ref_helpers_return_empty_on_command_failure(
 def test_commit_pair_branch_ref_exists_returns_false_for_missing_refs(
     tmp_path: Path,
 ) -> None:
-    assert not commit_pair_module._branch_ref_exists(  # noqa: SLF001
+    assert not commit_pair_resolve._branch_ref_exists(  # noqa: SLF001
         runner=_StaticRunner(returncode=1),
         repo_dir=tmp_path,
         branch="missing",
@@ -350,7 +351,7 @@ def test_commit_pair_branch_ref_exists_returns_false_for_missing_refs(
 
 
 def test_commit_pair_normalize_branch_names_skips_origin_head() -> None:
-    assert commit_pair_module._normalize_branch_names(  # noqa: SLF001
+    assert commit_pair_resolve._normalize_branch_names(  # noqa: SLF001
         (
             "remotes/origin/HEAD -> origin/main",
             " remotes/origin/feature ",
@@ -361,7 +362,7 @@ def test_commit_pair_normalize_branch_names_skips_origin_head() -> None:
 
 def test_commit_pair_normalizes_repository_url_edges() -> None:
     normalize_repository_url = (
-        commit_pair_module._normalized_repository_url  # noqa: SLF001
+        commit_pair_resolve._normalized_repository_url  # noqa: SLF001
     )
     assert normalize_repository_url("") == ""
     assert normalize_repository_url("https:///owner/repo.git") == "https:///owner/repo"
@@ -375,9 +376,9 @@ def test_commit_pair_cwd_origin_mismatch_when_git_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(commit_pair_module.shutil, "which", lambda _command: None)
+    monkeypatch.setattr(commit_pair_resolve.shutil, "which", lambda _command: None)
 
-    assert not commit_pair_module._cwd_origin_matches(  # noqa: SLF001
+    assert not commit_pair_resolve._cwd_origin_matches(  # noqa: SLF001
         cwd=tmp_path,
         repository_url="git@github.com:owner/repo.git",
         runner=_StaticRunner(),
@@ -387,7 +388,7 @@ def test_commit_pair_cwd_origin_mismatch_when_git_is_unavailable(
 def test_codex_generated_commit_pair_slug_handles_command_failure(
     tmp_path: Path,
 ) -> None:
-    slug = commit_pair_module._codex_generated_slug(  # noqa: SLF001
+    slug = commit_pair_records._codex_generated_slug(  # noqa: SLF001
         cwd=tmp_path,
         runner=_FailingRunner(tmp_path),
         left=_resolved_commit(short_sha="a" * 12, message="Left"),
@@ -400,7 +401,7 @@ def test_codex_generated_commit_pair_slug_handles_command_failure(
 def test_codex_generated_commit_pair_slug_uses_first_slug_line(
     tmp_path: Path,
 ) -> None:
-    slug = commit_pair_module._codex_generated_slug(  # noqa: SLF001
+    slug = commit_pair_records._codex_generated_slug(  # noqa: SLF001
         cwd=tmp_path,
         runner=_StaticRunner(output="\nUseful comparison slug!\n"),
         left=_resolved_commit(short_sha="a" * 12, message="Left"),
@@ -413,7 +414,7 @@ def test_codex_generated_commit_pair_slug_uses_first_slug_line(
 def test_slug_used_for_different_pair_returns_false_for_empty_wiki(
     tmp_path: Path,
 ) -> None:
-    assert not commit_pair_module._slug_used_for_different_pair(  # noqa: SLF001
+    assert not commit_pair_records._slug_used_for_different_pair(  # noqa: SLF001
         wiki_dir=tmp_path,
         slug="compare",
         left_sha="a" * 40,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from diamond_dev import acceptance
 from diamond_dev.acceptance import (
     ACCEPTANCE_CHECKBOX,
     acceptance_checkbox,
@@ -117,3 +118,17 @@ def test_acceptance_wait_delays_rejects_non_positive_values(
 ) -> None:
     with pytest.raises(ValueError, match=expected_message):
         acceptance_wait_delays(**kwargs)
+
+
+def test_acceptance_checkbox_supports_more_than_two_agents() -> None:
+    agent_names = ("codex", "claude", "claude-b")
+    markdown = acceptance.ensure_acceptance_checkbox("Comparison\n", agent_names)
+
+    assert "- [ ] Accept: (codex/claude/claude-b)" in markdown
+    assert acceptance.parse_acceptance(markdown, agent_names) is None
+
+    accepted_markdown = markdown.replace(
+        "- [ ] Accept: (codex/claude/claude-b)",
+        "- [x] Accept: claude-b",
+    )
+    assert acceptance.parse_acceptance(accepted_markdown, agent_names) == "claude-b"

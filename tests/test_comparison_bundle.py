@@ -51,6 +51,7 @@ class _FakeGit:
     def __init__(self, tmp_path: Path) -> None:
         self.tmp_path = tmp_path
         self.name_status: dict[str, str] = {}
+        self.numstat: dict[str, str] = {}
         self.diffs: dict[tuple[str, str], str] = {}
         self.dirty_labels: list[str] = []
 
@@ -80,6 +81,8 @@ class _FakeGit:
         output = ""
         if args[:2] == ("diff", "--name-status"):
             output = self.name_status[repo_dir.name]
+        elif args[:2] == ("diff", "--numstat"):
+            output = self.numstat.get(repo_dir.name, "")
         elif args[:2] == ("diff", "--no-color"):
             output = self.diffs[(repo_dir.name, args[-1])]
         return CommandResult(
@@ -394,4 +397,76 @@ def _context(
             base_branch="main",
         ),
         commit_pair=commit_pair,
+    )
+
+
+def test_comparison_bundle_reports_diff_size_from_numstat(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    runner = _FakeRunner(tmp_path)
+    git = _FakeGit(tmp_path)
+    git.name_status = {
+        "codex-my-plan": "M\tsrc/app.py\n",
+        "claude-my-plan": "",
+    }
+    git.numstat = {
+        "codex-my-plan": "10\t2\tsrc/app.py\n-\t-\tlogo.png\n",
+        "claude-my-plan": "",
+    }
+    git.diffs = {
+        ("codex-my-plan", "src/app.py"): "diff --git a/src/app.py b/src/app.py\n",
+    }
+
+    write_comparison_bundle(context=context, runner=runner, git=git)
+
+    bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
+    assert "- Diff size: +10 / -2 lines, binary files: 1" in bundle
+    assert "- Diff size: +0 / -0 lines" in bundle
+    assert "- signals: not_run" in bundle
+
+
+def test_comparison_bundle_records_configured_signal_results(tmp_path: Path) -> None:
+    context = _context(
+        tmp_path,
+        comparison=ComparisonConfig(
+            signal_commands=("uv run lizard", "wc -l src/app.py"),
+            max_signal_output_bytes=12,
+        ),
+    )
+    runner = _FakeRunner(tmp_path)
+    runner.results = {
+        "codex-comparison-signal-1": (0, "complexity ok\n"),
+        "codex-comparison-signal-2": (2, "long signal output to clip\n"),
+        "claude-comparison-signal-1": (0, "complexity ok\n"),
+        "claude-comparison-signal-2": (2, "long signal output to clip\n"),
+    }
+    git = _FakeGit(tmp_path)
+    git.name_status = {
+        "codex-my-plan": "",
+        "claude-my-plan": "",
+    }
+
+    updated_context = write_comparison_bundle(
+        context=context,
+        runner=runner,
+        git=git,
+    )
+
+    bundle = context.comparison_bundle_file.read_text(encoding="utf-8")
+    assert [call[0] for call in runner.calls] == [
+        ("sh", "-lc", "uv run lizard"),
+        ("sh", "-lc", "wc -l src/app.py"),
+        ("sh", "-lc", "uv run lizard"),
+        ("sh", "-lc", "wc -l src/app.py"),
+    ]
+    assert "### Signals" in bundle
+    assert "- tests: not_run" in bundle
+    assert "Status: failed (exit 2)" in bundle
+    assert "Omitted output bytes:" in bundle
+    assert git.dirty_labels == [
+        "codex comparison signals",
+        "claude comparison signals",
+    ]
+    assert tuple(record.label for record in updated_context.dirty_records) == (
+        "codex comparison signals",
+        "claude comparison signals",
     )

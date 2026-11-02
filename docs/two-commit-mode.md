@@ -5,7 +5,7 @@ exist. Pass exactly two commit-ish refs and it skips the implementation agents,
 builds the comparison bundle for those two inputs, and runs the rest of the normal
 workflow — comparison judgment, acceptance, follow-up, review, and PR. This guide
 covers invocation, how refs are resolved, and how clone/branch names are derived.
-The logic lives in [`commit_pair.py`](../diamond_dev/commit_pair.py). Read the main
+The logic lives in the [`commit_pair/`](../diamond_dev/commit_pair/) package. Read the main
 [README](../README.md) first.
 
 ## Invocation

@@ -49,7 +49,7 @@ def write_comparison_bundle(
         "",
     ]
     for branch in context.implementation.branches:
-        branch_lines, tests_ran = _branch_section(
+        branch_lines, ran_sections = _branch_section(
             context=context,
             runner=runner,
             git=git,
@@ -57,13 +57,13 @@ def write_comparison_bundle(
             diff_budget=diff_budget,
         )
         lines.extend(branch_lines)
-        if tests_ran:
+        for section_name in ran_sections:
             active_context = git.record_dirty_files(
                 active_context,
-                f"{branch.agent_name} comparison tests",
+                f"{branch.agent_name} comparison {section_name}",
                 branch.repo_dir,
                 branch.branch,
-                log_prefix=f"{branch.log_prefix}-comparison-tests",
+                log_prefix=f"{branch.log_prefix}-comparison-{section_name}",
             )
 
     bundle_markdown = "\n".join(lines).rstrip()
@@ -102,7 +102,7 @@ def _branch_section(
     git: ComparisonGitOperations,
     branch: ImplementationBranch,
     diff_budget: _DiffBudget,
-) -> tuple[list[str], bool]:
+) -> tuple[list[str], tuple[str, ...]]:
     head_revision = git.revision(
         branch.repo_dir,
         branch.branch,
@@ -135,6 +135,7 @@ def _branch_section(
         ),
         f"- Changed files: {len(changed_files)}",
         *_change_stat_lines(changed_files),
+        _diff_size_line(context=context, git=git, branch=branch),
         "",
         "### Changed file list",
         "",
@@ -146,12 +147,28 @@ def _branch_section(
         "### Tests",
         "",
     ]
-    test_lines, tests_ran = _test_lines(
-        context=context,
+    ran_sections: list[str] = []
+    test_lines, tests_ran = _command_lines(
         runner=runner,
         branch=branch,
+        commands=context.config.comparison.test_commands,
+        log_tag="test",
+        max_output_bytes=context.config.comparison.max_test_output_bytes,
     )
     lines.extend(test_lines)
+    if tests_ran:
+        ran_sections.append("tests")
+    lines.extend(("", "### Signals", ""))
+    signal_lines, signals_ran = _command_lines(
+        runner=runner,
+        branch=branch,
+        commands=context.config.comparison.signal_commands,
+        log_tag="signal",
+        max_output_bytes=context.config.comparison.max_signal_output_bytes,
+    )
+    lines.extend(signal_lines)
+    if signals_ran:
+        ran_sections.append("signals")
     lines.extend(("", "### Capped diffs", ""))
     lines.extend(
         _diff_lines(
@@ -163,7 +180,40 @@ def _branch_section(
         ),
     )
     lines.append("")
-    return lines, tests_ran
+    return lines, tuple(ran_sections)
+
+
+def _diff_size_line(
+    *,
+    context: RunContext,
+    git: ComparisonGitOperations,
+    branch: ImplementationBranch,
+) -> str:
+    numstat_output = git.run(
+        branch.repo_dir,
+        "diff",
+        "--numstat",
+        f"origin/{context.implementation.base_branch}...{branch.branch}",
+        log_name=f"{branch.log_prefix}-comparison-numstat",
+    ).output
+    insertions = 0
+    deletions = 0
+    binary_files = 0
+    for line in numstat_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added, removed = parts[0], parts[1]
+        if added == "-" or removed == "-":
+            binary_files += 1
+            continue
+        try:
+            insertions += int(added)
+            deletions += int(removed)
+        except (ValueError,):
+            continue
+    binary_note = f", binary files: {binary_files}" if binary_files else ""
+    return f"- Diff size: +{insertions} / -{deletions} lines{binary_note}"
 
 
 def _changed_files(name_status_output: str) -> tuple[_ChangedFile, ...]:
@@ -240,21 +290,20 @@ def _changed_file_list_lines(
     return included
 
 
-def _test_lines(
+def _command_lines(
     *,
-    context: RunContext,
     runner: CommandExecutor,
     branch: ImplementationBranch,
+    commands: Sequence[str],
+    log_tag: str,
+    max_output_bytes: int,
 ) -> tuple[list[str], bool]:
-    if not context.config.comparison.test_commands:
-        return ["- tests: not_run"], False
+    if not commands:
+        return [f"- {log_tag}s: not_run"], False
 
     lines: list[str] = []
-    for index, command_text in enumerate(
-        context.config.comparison.test_commands,
-        start=1,
-    ):
-        log_name = f"{branch.log_prefix}-comparison-test-{index}"
+    for index, command_text in enumerate(commands, start=1):
+        log_name = f"{branch.log_prefix}-comparison-{log_tag}-{index}"
         result = runner.run(
             ("sh", "-lc", command_text),
             cwd=branch.repo_dir,
@@ -264,7 +313,7 @@ def _test_lines(
         status = "passed" if result.returncode == 0 else "failed"
         clipped_output, omitted_bytes = _clip_bytes(
             result.output,
-            context.config.comparison.max_test_output_bytes,
+            max_output_bytes,
         )
         lines.extend(
             (

@@ -81,7 +81,13 @@ class PullRequestFinalizationMixin:
         )
         pr_url = created_pr.url
         pr_number = created_pr.number
-        notify_url(context.config.notifications.open_pr_url, label="open pr")
+        notify_url(
+            context.config.notifications.open_pr_url,
+            label="open pr",
+            notification_format=context.config.notifications.format,
+            slug=context.plan.slug,
+            link=pr_url,
+        )
         context = context.with_pr_url(pr_url)
 
         final_reviewer = context.config.workflow.final_reviewer

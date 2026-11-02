@@ -107,6 +107,28 @@ def derive_wiki_repository_url(repository_url: str) -> str:
     return f"{parsed_url.scheme}://{parsed_url.netloc}/{owner}/{repo_name}.wiki.git"
 
 
+def github_wiki_page_url(wiki_repository_url: str, page_name: str) -> str | None:
+    """Return the GitHub web URL for a wiki page, if derivable."""
+    cleaned_url = wiki_repository_url.strip().rstrip("/")
+    match = _SCP_GITHUB_PATTERN.match(cleaned_url)
+    if match is not None:
+        owner = match.group("owner")
+        repo_name = _strip_git_suffix(match.group("repo"))
+    else:
+        parsed_url = urlparse(cleaned_url)
+        if parsed_url.hostname != "github.com":
+            return None
+        path_parts = [part for part in parsed_url.path.split("/") if part]
+        if len(path_parts) != 2:
+            return None
+        owner = path_parts[0]
+        repo_name = _strip_git_suffix(path_parts[1])
+    repo_name = repo_name.removesuffix(".wiki")
+    if not owner or not repo_name:
+        return None
+    return f"https://github.com/{owner}/{repo_name}/wiki/{page_name}"
+
+
 def _strip_git_suffix(repo_name: str) -> str:
     if repo_name.endswith(".git"):
         return repo_name[:-4]

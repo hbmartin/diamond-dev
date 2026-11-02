@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/hbmartin/diamond-dev/main/docs/diamond-dev.schema.json",
+  "title": "Diamond Dev configuration",
+  "description": "Schema for the .diamond-dev.toml workflow configuration file.",
+  "type": "object",
+  "required": ["repository_url"],
+  "additionalProperties": false,
+  "properties": {
+    "repository_url": {
+      "type": "string",
+      "description": "Git remote URL of the implementation repository."
+    },
+    "wiki_repository_url": {
+      "type": "string",
+      "description": "Git remote URL of the GitHub Gollum wiki repository. Derived from repository_url when omitted."
+    },
+    "gemini_comparison_prompt_file": {
+      "type": "string",
+      "description": "Legacy alias for prompts.gemini_comparison_file.",
+      "deprecated": true
+    },
+    "notify_initial_implementation_url": {
+      "type": "string",
+      "description": "Legacy alias for notifications.initial_implementation_url.",
+      "deprecated": true
+    },
+    "notify_comparison_url": {
+      "type": "string",
+      "description": "Legacy alias for notifications.comparison_url.",
+      "deprecated": true
+    },
+    "notify_comparison_implementation_url": {
+      "type": "string",
+      "description": "Legacy alias for notifications.comparison_implementation_url.",
+      "deprecated": true
+    },
+    "notify_review_input_needed_url": {
+      "type": "string",
+      "description": "Legacy alias for notifications.review_input_needed_url.",
+      "deprecated": true
+    },
+    "notify_open_pr_url": {
+      "type": "string",
+      "description": "Legacy alias for notifications.open_pr_url.",
+      "deprecated": true
+    },
+    "notifications": {
+      "type": "object",
+      "description": "Best-effort notification webhook settings.",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["get", "json", "slack", "discord", "ntfy"],
+          "default": "get",
+          "description": "How notification URLs are called: a plain GET, a JSON POST, or a Slack/Discord/ntfy-shaped POST."
+        },
+        "initial_implementation_url": {
+          "type": "string",
+          "description": "Called when all initial implementations are pushed."
+        },
+        "comparison_url": {
+          "type": "string",
+          "description": "Called when the comparison page is published to the wiki."
+        },
+        "comparison_implementation_url": {
+          "type": "string",
+          "description": "Called when comparison follow-up work is pushed."
+        },
+        "review_input_needed_url": {
+          "type": "string",
+          "description": "Called when review judgments need human input."
+        },
+        "open_pr_url": {
+          "type": "string",
+          "description": "Called when the final pull request is opened."
+        }
+      }
+    },
+    "prompts": {
+      "type": "object",
+      "description": "Prompt override files, relative to the config directory.",
+      "additionalProperties": false,
+      "properties": {
+        "initial_implementation_file": {
+          "type": "string",
+          "description": "Override for the initial implementation prompt."
+        },
+        "comparison_judgment_file": {
+          "type": "string",
+          "description": "Override for the comparison judgment prompt."
+        },
+        "gemini_comparison_file": {
+          "type": "string",
+          "description": "Legacy name for comparison_judgment_file.",
+          "deprecated": true
+        },
+        "comparison_implementation_file": {
+          "type": "string",
+          "description": "Override for the comparison follow-up prompt."
+        },
+        "review_judgment_file": {
+          "type": "string",
+          "description": "Override for the review judgment prompt."
+        },
+        "review_fix_file": {
+          "type": "string",
+          "description": "Override for the review fix prompt."
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "description": "Agent names filling each workflow role.",
+      "additionalProperties": false,
+      "properties": {
+        "implementers": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/agentName"
+          },
+          "default": ["codex", "claude"],
+          "description": "Two or more agents that implement the plan in parallel."
+        },
+        "comparison_judge": {
+          "$ref": "#/$defs/agentName",
+          "default": "gemini",
+          "description": "Agent that writes the comparison page."
+        },
+        "comparison_fixer": {
+          "$ref": "#/$defs/agentName",
+          "description": "Agent that applies comparison follow-up. Defaults to the first non-accepted implementer."
+        },
+        "review_provider": {
+          "$ref": "#/$defs/agentName",
+          "default": "coderabbit",
+          "description": "Agent that produces the code review."
+        },
+        "review_judge": {
+          "$ref": "#/$defs/agentName",
+          "default": "codex",
+          "description": "Agent that classifies review findings."
+        },
+        "review_fixer": {
+          "$ref": "#/$defs/agentName",
+          "default": "codex",
+          "description": "Agent that applies accepted review fixes."
+        },
+        "final_reviewer": {
+          "$ref": "#/$defs/agentName",
+          "default": "claude",
+          "description": "Agent that runs the final interactive PR review."
+        }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "description": "Comparison bundle generation settings.",
+      "additionalProperties": false,
+      "properties": {
+        "test_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Shell commands run per branch; their status and capped output are included in the bundle."
+        },
+        "signal_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Shell commands run per branch whose capped output feeds the judge as extra signals (lint, complexity, coverage)."
+        },
+        "max_total_diff_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "default": 200000,
+          "description": "Total diff byte budget across all branches."
+        },
+        "max_file_diff_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "default": 40000,
+          "description": "Per-file diff byte cap."
+        },
+        "max_test_output_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "default": 20000,
+          "description": "Byte cap for each test command's captured output."
+        },
+        "max_signal_output_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "default": 20000,
+          "description": "Byte cap for each signal command's captured output."
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "description": "Wiki acceptance polling settings.",
+      "additionalProperties": false,
+      "properties": {
+        "poll_interval_seconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "default": 120,
+          "description": "Seconds between acceptance checks."
+        },
+        "max_wait_seconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "default": 4620,
+          "description": "Total seconds to wait for acceptance."
+        }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "description": "Per-agent adapter and model settings, keyed by agent name.",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z0-9]+(-[a-z0-9]+)*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "adapter": {
+              "$ref": "#/$defs/agentName",
+              "description": "Adapter backing this agent (built-in or plugin). Defaults to the agent name."
+            },
+            "model": {
+              "type": "string",
+              "description": "Model passed to the agent CLI."
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "agentName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    }
+  }
+}

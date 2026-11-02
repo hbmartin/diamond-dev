@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Final
 
 from loguru import logger
 
-from diamond_dev.agents import adapter_names
+from diamond_dev.agents import adapter_names, resolve_adapter
 from diamond_dev.errors import DiamondDevError
 from diamond_dev.naming import derive_wiki_repository_url, wiki_directory_name
 
@@ -21,10 +21,6 @@ if TYPE_CHECKING:
     from diamond_dev.executor import CommandExecutor, CommandResult
 
 REQUIRED_CORE_CLI_NAMES: Final = ("git", "gh")
-_DOCTOR_GEMINI_PROMPT: Final = (
-    "Diamond Dev doctor authentication check. Reply with exactly OK and do not "
-    "use tools."
-)
 _DOCTOR_GIT_USER_NAME: Final = "diamond-dev"
 _DOCTOR_GIT_USER_EMAIL: Final = "diamond-dev@example.invalid"
 
@@ -287,6 +283,13 @@ def _check_agent_auth(
         agent_config = config.agent_config(agent_name)
         adapter_name = agent_config.adapter_name(agent_name)
         command = _agent_auth_command(adapter_name, model=agent_config.model)
+        if command is None:
+            logger.info(
+                "Agent `{}` adapter `{}` has no authentication probe; skipping",
+                agent_name,
+                adapter_name,
+            )
+            continue
         result = runner.run(
             command,
             cwd=cwd,
@@ -326,26 +329,8 @@ def _agent_auth_command(
     adapter_name: str,
     *,
     model: str | None,
-) -> tuple[str, ...]:
-    match adapter_name:
-        case "codex":
-            command = ("codex", "login", "status")
-        case "claude":
-            command = ("claude", "auth", "status", "--text")
-        case "gemini":
-            model_args = () if model is None else ("-m", model)
-            command = (
-                "gemini",
-                *model_args,
-                "-p",
-                _DOCTOR_GEMINI_PROMPT,
-                "--skip-trust",
-            )
-        case "coderabbit":
-            command = ("coderabbit", "auth", "status", "--agent")
-        case _:
-            raise DiamondDevError(f"Unknown agent adapter: {adapter_name}")
-    return command
+) -> tuple[str, ...] | None:
+    return resolve_adapter(adapter_name).auth_command(model=model)
 
 
 def _check_wiki_access(

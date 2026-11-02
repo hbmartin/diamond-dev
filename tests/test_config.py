@@ -458,3 +458,81 @@ def test_read_gemini_prompt_wraps_decode_failures(tmp_path: Path) -> None:
         read_gemini_prompt(load_config(tmp_path))
 
     assert isinstance(exc_info.value.__cause__, UnicodeDecodeError)
+
+
+def test_load_config_parses_notification_format(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[notifications]\n"
+        'format = "slack"\n'
+        'comparison_url = "https://hooks.slack.test/x"\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.notifications.format == "slack"
+    assert config.notifications.comparison_url == "https://hooks.slack.test/x"
+
+
+def test_load_config_rejects_unknown_notification_format(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[notifications]\n"
+        'format = "carrier-pigeon"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="notifications.format"):
+        load_config(tmp_path)
+
+
+def test_load_config_parses_comparison_signal_commands(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[comparison]\n"
+        'signal_commands = ["uv run lizard"]\n'
+        "max_signal_output_bytes = 512\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.comparison.signal_commands == ("uv run lizard",)
+    assert config.comparison.max_signal_output_bytes == 512
+
+
+def test_load_config_supports_best_of_n_self_competition(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[workflow]\n"
+        'implementers = ["codex", "claude", "claude-b"]\n'
+        "[agents.claude-b]\n"
+        'adapter = "claude"\n'
+        'model = "opus-experimental"\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.workflow.implementers == ("codex", "claude", "claude-b")
+    assert config.agent_adapter_name("claude-b") == "claude"
+    assert config.agent_config("claude-b").model == "opus-experimental"
+    # The claude executable is required once even though two agents use it.
+    assert config.required_cli_names().count("claude") == 1
+    # The comparison fixer defaults to the first non-accepted implementer.
+    assert config.workflow.comparison_fixer_for("codex") == "claude"
+    assert config.workflow.comparison_fixer_for("claude") == "codex"
+    assert config.workflow.comparison_fixer_for("claude-b") == "codex"
+
+
+def test_load_config_rejects_duplicate_implementers(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'repository_url = "git@github.com:owner/repo.git"\n'
+        "[workflow]\n"
+        'implementers = ["claude", "claude"]\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="duplicate"):
+        load_config(tmp_path)

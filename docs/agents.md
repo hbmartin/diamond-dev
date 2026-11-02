@@ -11,14 +11,15 @@ keys, see [Configuration](configuration.md).
 ## The adapter model
 
 An **agent name** is a workflow-local label (the keys under `[agents.*]` and the
-values in `[workflow]`). Each name resolves to one **adapter** — a built-in CLI
-integration. Built-in names map to their own adapter implicitly; any other name
-must set `adapter` to a built-in (see [custom agents](#custom-agent-names)).
+values in `[workflow]`). Each name resolves to one **adapter** — a built-in or
+[plugin](#plugin-adapters) CLI integration. Adapter names map to their own
+adapter implicitly; any other name must set `adapter` (see
+[custom agents](#custom-agent-names)).
 
 Each adapter declares a frozenset of **capabilities**. A role assignment is only
 valid if the backing adapter has the matching capability, and this is enforced at
 config load by `_validate_agent_configuration` in
-[`config.py`](../diamond_dev/config.py) — a mismatch fails fast with a clear error.
+[`config/loader.py`](../diamond_dev/config/loader.py) — a mismatch fails fast with a clear error.
 
 ## Built-in adapters and capabilities
 
@@ -28,11 +29,16 @@ config load by `_validate_agent_configuration` in
 | `claude` | `claude` | `implementation`, `comparison_fixer`, `review_judge`, `review_fixer`, `final_reviewer` |
 | `gemini` | `gemini` | `comparison_judge` |
 | `coderabbit` | `coderabbit` | `review_provider` |
+| `opencode` | `opencode` | `implementation`, `comparison_fixer`, `review_judge`, `review_fixer` |
+| `cursor-agent` | `cursor-agent` | `implementation`, `comparison_fixer`, `review_judge`, `review_fixer` |
+| `copilot` | `copilot` | `implementation`, `comparison_fixer`, `review_judge`, `review_fixer` |
+| `qwen` | `qwen` | `implementation`, `comparison_fixer`, `review_judge`, `review_fixer` |
+| `aider` | `aider` | `implementation`, `comparison_fixer`, `review_judge`, `review_fixer` |
 
 Consequences worth noting: only `claude` can be the `final_reviewer`; only `gemini`
 can be the `comparison_judge`; only `coderabbit` can be the `review_provider`; and
-`gemini`/`coderabbit` cannot be implementers. `codex` and `claude` are the
-interchangeable code-writers.
+`gemini`/`coderabbit` cannot be implementers. Every other adapter is an
+interchangeable code-writer.
 
 ## Roles → capabilities → `[workflow]` keys
 
@@ -62,6 +68,11 @@ non-interactively with sandboxing and approval prompts disabled.
 | `claude` (prompt) | `claude [--model <model>] -p --permission-mode bypassPermissions --dangerously-skip-permissions <prompt>` |
 | `gemini` (prompt) | `gemini [-m <model>] -p <prompt> --skip-trust -y` |
 | `coderabbit` (review) | `coderabbit review --plain --base <base-branch>` |
+| `opencode` (prompt) | `opencode run [--model <model>] <prompt>` |
+| `cursor-agent` (prompt) | `cursor-agent [--model <model>] -p --force <prompt>` |
+| `copilot` (prompt) | `copilot [--model <model>] -p <prompt> --allow-all-tools` |
+| `qwen` (prompt) | `qwen [-m <model>] -p <prompt> -y` |
+| `aider` (prompt) | `aider [--model <model>] --yes-always --message <prompt>` |
 | `claude` (final review) | `claude [--model <model>] --permission-mode bypassPermissions --dangerously-skip-permissions /review <pr-number>` |
 
 The review provider and final reviewer are **not** prompt-overridable — they run
@@ -93,11 +104,46 @@ The custom agent inherits its adapter's capabilities, so it can fill any role th
 adapter supports. `[agents.<name>].model` becomes the CLI's model flag; omit it to
 use the CLI's own default.
 
+## Plugin adapters
+
+Third-party packages can register additional adapters through the
+`diamond_dev.agents` entry-point group. Each entry point may provide an
+`AgentAdapter` instance, an iterable of them, or a zero-argument callable
+returning either:
+
+```toml
+# pyproject.toml of a plugin package
+[project.entry-points."diamond_dev.agents"]
+my-agent = "my_package.adapters:MY_AGENT_ADAPTER"
+```
+
+```python
+# my_package/adapters.py
+from diamond_dev.agents import AgentAdapter
+
+MY_AGENT_ADAPTER = AgentAdapter(
+    name="my-agent",
+    executable="my-agent",
+    capabilities=frozenset({"implementation", "comparison_fixer"}),
+    build_prompt_command=lambda repo_dir, prompt, model: ("my-agent", prompt),
+    build_auth_command=lambda model: ("my-agent", "auth", "status"),
+)
+```
+
+Plugin adapters behave exactly like built-ins: their names resolve implicitly,
+they can back custom agent names via `adapter`, and their capabilities gate
+role assignment. Invalid plugins never break startup — an adapter is skipped
+with a logged warning when its name is malformed, its capabilities are unknown,
+it collides with a built-in, or the entry point fails to load. Set
+`build_auth_command` to give `doctor` an auth probe; leave it unset to skip the
+probe for that adapter.
+
 ## Authentication and `doctor`
 
 Preflight (run before every workflow, and on its own via `diamond-dev doctor`)
-probes each configured agent's auth. The probe per adapter
-(`_agent_auth_command` in [`preflight.py`](../diamond_dev/preflight.py)):
+probes each configured agent's auth using the adapter's optional
+`build_auth_command` (defined in [`agents.py`](../diamond_dev/agents.py));
+adapters without one are skipped with a log line:
 
 | Adapter | Auth probe |
 | --- | --- |
@@ -105,6 +151,9 @@ probes each configured agent's auth. The probe per adapter
 | `claude` | `claude auth status --text` |
 | `gemini` | a tiny headless prompt (`gemini [-m <model>] -p <check> --skip-trust`) — Gemini has no status command |
 | `coderabbit` | `coderabbit auth status --agent` |
+| `opencode` | `opencode auth list` |
+| `cursor-agent` | `cursor-agent status` |
+| `copilot`, `qwen`, `aider` | none — skipped |
 
 Preflight also verifies `gh auth status`, that required CLIs are on `PATH`, that the
 workspace/logs/wiki directories are writable, and that the wiki remote accepts a

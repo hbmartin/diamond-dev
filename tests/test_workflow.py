@@ -103,3 +103,29 @@ def test_build_run_context_uses_configured_implementers(
         "claude-fixer/my-plan"
     )
     assert selected.comparison_fixer == "claude-fixer"
+
+
+def test_build_run_context_creates_branch_per_implementer(tmp_path: Path) -> None:
+    plan_path = tmp_path / "My Plan.md"
+    plan_path.write_text("# Plan\n", encoding="utf-8")
+    config = DiamondDevConfig(
+        config_path=tmp_path / ".diamond-dev.toml",
+        repository_url="git@github.com:owner/repo.git",
+        workflow=WorkflowConfig(implementers=("codex", "claude", "claude-b")),
+    )
+
+    context = workflow.build_run_context(
+        cwd=tmp_path,
+        plan_path=plan_path,
+        config=config,
+    )
+
+    assert context.implementation.implementer_names == (
+        "codex",
+        "claude",
+        "claude-b",
+    )
+    third_branch = context.implementation.branch_for("claude-b")
+    assert third_branch.repo_dir == tmp_path / "claude-b-my-plan"
+    assert third_branch.branch == "claude-b/my-plan"
+    assert third_branch.log_prefix == "claude-b"

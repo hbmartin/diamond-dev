@@ -4,8 +4,15 @@
 passed to `--config`). Only one key is required; everything else has a default, so
 most projects need just a few lines. This guide is the complete reference for every
 table and key. The loader and validation live in
-[`config.py`](../diamond_dev/config.py); the [README](../README.md) covers the
+[`config/`](../diamond_dev/config/); the [README](../README.md) covers the
 minimal config and the rest of the getting-started path.
+
+## Editor validation
+
+[`docs/diamond-dev.schema.json`](diamond-dev.schema.json) is a JSON Schema for
+this file. TOML language servers such as Taplo and Tombi can validate
+`.diamond-dev.toml` against it, and `diamond-dev validate` checks the loaded
+config from the command line.
 
 ## Minimal configuration
 
@@ -100,11 +107,11 @@ model = "opus"
 
 Each key names a configured agent that fills one workflow role. Defaults are shown
 above. Validation (`_load_workflow` and `_validate_agent_configuration` in
-[`config.py`](../diamond_dev/config.py)) enforces:
+[`config/loader.py`](../diamond_dev/config/loader.py)) enforces:
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `implementers` | `["codex", "claude"]` | Array of **at least two** distinct agent names. Each must back an adapter with the `implementation` capability. |
+| `implementers` | `["codex", "claude"]` | Array of **at least two** distinct agent names. Each must back an adapter with the `implementation` capability. More than two agents fan the plan out best-of-N style, and the same adapter can compete against itself through distinct agent names (see below). |
 | `comparison_judge` | `"gemini"` | Needs the `comparison_judge` capability. |
 | `comparison_fixer` | *(unset)* | Optional. When unset, the first implementer that is not the accepted branch is used. |
 | `review_provider` | `"coderabbit"` | Needs the `review_provider` capability. |
@@ -116,16 +123,37 @@ A role agent whose adapter lacks the required capability fails at config load. S
 [Agents & custom adapters](agents.md) for the capability matrix and how to add
 your own agent names.
 
+### Best-of-N and self-competition
+
+`implementers` accepts any number of agents (minimum two). Each gets its own
+clone (`<agent>-<slug>`) and branch (`<agent>/<slug>`), the comparison bundle
+includes one section per branch, and the acceptance checkbox lists every
+implementer. To make one CLI compete against itself — for example with two
+different models — define extra agent names backed by the same adapter:
+
+```toml
+[workflow]
+implementers = ["codex", "claude", "claude-b"]
+
+[agents.claude-b]
+adapter = "claude"
+model = "claude-opus-4-8"
+```
+
+When `comparison_fixer` is unset, the first implementer that is not the accepted
+branch applies the comparison follow-up.
+
 ## `[agents.<name>]` — adapters and models
 
 Agent table names are workflow-local agent names. Built-in names (`codex`,
-`claude`, `gemini`, `coderabbit`) implicitly use the matching adapter. Any other
-name **must** set `adapter` to one of those built-ins, which lets a workflow use
-the same CLI in multiple roles with different models.
+`claude`, `gemini`, `coderabbit`, `opencode`, `cursor-agent`, `copilot`, `qwen`,
+`aider`) implicitly use the matching adapter. Any other name **must** set
+`adapter` to a built-in or [plugin](agents.md#plugin-adapters) adapter, which
+lets a workflow use the same CLI in multiple roles with different models.
 
 | Key | Purpose |
 | --- | --- |
-| `adapter` | The built-in adapter that backs this agent. Required for non-built-in names; defaults to the agent name for built-ins. |
+| `adapter` | The built-in or plugin adapter that backs this agent. Required for names that are not adapter names; defaults to the agent name otherwise. |
 | `model` | The model flag passed to the CLI (e.g. `gpt-5`, `opus`, `gemini-3`). Omitted means the CLI's own default. |
 
 Agent names must match `^[a-z0-9]+(?:-[a-z0-9]+)*$` — lowercase letters, numbers,
@@ -141,12 +169,14 @@ format). Byte limits must be positive integers.
 | Key | Default | Purpose |
 | --- | --- | --- |
 | `test_commands` | `[]` | Commands run with `sh -lc` in each implementation clone. Empty records `tests: not_run`. Nonzero exits are recorded but do **not** stop the workflow. |
+| `signal_commands` | `[]` | Extra judge signals (lint, complexity, coverage) run with `sh -lc` in each implementation clone; status and capped output land in the bundle's `### Signals` section. Empty records `signals: not_run`. |
 | `max_total_diff_bytes` | `200000` | Total diff byte budget across all branches in the bundle. |
 | `max_file_diff_bytes` | `40000` | Per-file diff byte cap. |
 | `max_test_output_bytes` | `20000` | Per-command captured test-output cap. |
+| `max_signal_output_bytes` | `20000` | Per-command captured signal-output cap. |
 
-Test commands are trusted project-specific commands and run with sandboxing
-disabled. If they leave uncommitted files, `diamond-dev` records those dirty files
+Test and signal commands are trusted project-specific commands and run with
+sandboxing disabled. If they leave uncommitted files, `diamond-dev` records those dirty files
 but does not clean them. See the [README Security](../README.md#security) section.
 
 ## `[acceptance]` — wiki polling
@@ -168,13 +198,14 @@ acceptance unattended.
 
 ## `[notifications]` — webhooks
 
-Best-effort HTTP GET requests fired at phase boundaries. Failures are logged but
+Best-effort HTTP requests fired at phase boundaries. Failures are logged but
 never stop the workflow, and only `http`/`https` URLs are honored. See
 [Automation & CI integration](automation-and-ci.md#notification-webhooks) for the
-firing semantics and the meaning of each key.
+firing semantics, the payload of each format, and the meaning of each key.
 
 | Key | Fires when |
 | --- | --- |
+| `format` | *(not an event)* — how every URL is called: `get` (default, plain GET), `json` (structured POST), `slack`, `discord`, or `ntfy` (native POST payloads). |
 | `initial_implementation_url` | the initial implementation phase completes |
 | `comparison_url` | the comparison page is ready for your acceptance |
 | `comparison_implementation_url` | the comparison follow-up phase runs |
